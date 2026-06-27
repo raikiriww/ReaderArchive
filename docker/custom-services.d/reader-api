@@ -1,0 +1,26 @@
+#!/usr/bin/with-contenv bash
+set -e
+
+cd /app/backend
+if [ -d /run/s6/container_environment ]; then
+  for file in /run/s6/container_environment/*; do
+    [ -f "$file" ] || continue
+    name="$(basename "$file")"
+    value="$(cat "$file")"
+    export "${name}=${value}"
+  done
+fi
+
+export VIRTUAL_ENV=/app/backend/.venv
+export PATH="/app/backend/.venv/bin:${PATH}"
+
+archive_dir="${READER_ARCHIVE_DIR:-/app/data/archive}"
+browser_profile_dir="${READER_BROWSER_PROFILE_DIR:-/app/data/browser/config/.config/singlefile-api}"
+mkdir -p "$archive_dir" "$browser_profile_dir"
+chown abc:abc "$archive_dir" "$browser_profile_dir"
+
+echo "Running database migrations"
+s6-setuidgid abc /app/backend/.venv/bin/alembic upgrade head
+
+exec s6-setuidgid abc \
+  /app/backend/.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000

@@ -1,0 +1,113 @@
+:root {
+  color-scheme: light;
+  --bg: #f4f6f3;
+  --surface: #ffffff;
+  --surface-muted: #f8f9f7;
+  --surface-strong: #eef2ee;
+  --text: #202522;
+  --text-soft: #46524c;
+  --muted: #66716c;
+  --border: #dce3de;
+  --border-strong: #c5cec8;
+  --primary: #147a6d;
+  --primary-strong: #0e6157;
+  --primary-soft: #e7f1ef;
+  --warning: #b86d11;
+  --danger: #c63d32;
+  --danger-soft: #f8e8e6;
+  --row-hover: #f9fbf9;
+  --shadow: 0 2px 8px rgba(32, 37, 34, 0.08);
+  font-family: -apple-system, "SF Pro Text", "PingFang SC", "Noto Sans SC", sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+button,
+input,
+select {
+  font: inherit;
+}
+
+button {
+  touch-action: manipulation;
+}
+
+a,
+button,
+input,
+select {
+  -webkit-tap-highlight-color: transparent;
+}
+
+a {
+  color: inherit;
+}
+
+a:focus-visible,
+button:focus-visible,
+input:focus-visible,
+select:focus-visible {
+  outline: 3px solid rgba(20, 122, 109, 0.18);
+  outline-offset: 2px;
+}
+
+h1,
+h2,
+h3,
+p {
+  margin: 0;
+}
+
+h1 {
+  color: #1f2924;
+  font-size: 21px;
+  font-weight: 720;
+  line-height: 1.25;
+}
+
+h2 {
+  color: #1f2924;
+  font-size: 17px;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+h3 {
+  color: #1f2924;
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.visually-hidden {
+  width: 1px;
+  height: 1px;
+  position: absolute;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  border: 0;
+}
+
+.icon,
+svg {
+  flex: 0 0 auto;
+}

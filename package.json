@@ -1,0 +1,9 @@
+{
+  "private": true,
+  "license": "Apache-2.0",
+  "scripts": {
+    "verify": "scripts/verify_in_docker.sh",
+    "frontend:smoke": "node scripts/frontend_smoke_check.mjs"
+  },
+  "devDependencies": {}
+}

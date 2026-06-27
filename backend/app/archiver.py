@@ -1,0 +1,387 @@
+from __future__ import annotations
+
+import asyncio
+import os
+import signal
+from contextlib import suppress
+from pathlib import Path
+
+from app.core.config import Settings
+
+
+class BrowserLoginRequiredError(RuntimeError):
+    pass
+
+
+class BrowserOpener:
+    def __init__(self, settings: Settings) -> None:
+        self.settings = settings
+
+    async def open(self, url: str) -> None:
+        profile_dir = self.settings.browser_profile_dir
+        home_dir = self._browser_home_dir(profile_dir)
+        home_dir.mkdir(parents=True, exist_ok=True)
+        profile_dir.mkdir(parents=True, exist_ok=True)
+        self._remove_stale_singleton_files(profile_dir)
+
+        command = self._command_prefix() + [
+            self.settings.chrome_path,
+            "--new-tab",
+            url,
+            f"--user-data-dir={profile_dir}",
+            "--no-sandbox",
+            "--disable-dev-shm-usage",
+            "--disable-gpu",
+        ]
+        environment = {
+            **os.environ,
+            "HOME": str(home_dir),
+            "XDG_CONFIG_HOME": str(home_dir / ".config"),
+        }
+        process = await asyncio.create_subprocess_exec(
+            *command,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            env=environment,
+            start_new_session=True,
+        )
+        try:
+            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=5)
+        except TimeoutError:
+            return
+
+        if process.returncode != 0:
+            output = "\n".join(
+                text
+                for text in (
+                    stdout.decode(errors="replace").strip(),
+                    stderr.decode(errors="replace").strip(),
+                )
+                if text
+            )
+            msg = output[-1000:] if output else "Chrome failed to open the URL."
+            raise RuntimeError(msg)
+
+    def _browser_home_dir(self, profile_dir: Path) -> Path:
+        if profile_dir.parent.name == ".config":
+            return profile_dir.parent.parent
+        return profile_dir.parent
+
+    def _remove_stale_singleton_files(self, profile_dir: Path) -> None:
+        singleton_files = list(profile_dir.glob("Singleton*"))
+        if not singleton_files:
+            return
+        singleton_lock = profile_dir / "SingletonLock"
+        if self._singleton_lock_is_active(singleton_lock):
+            return
+        for path in singleton_files:
+            path.unlink(missing_ok=True)
+
+    def _singleton_lock_is_active(self, singleton_lock: Path) -> bool:
+        if not singleton_lock.is_symlink():
+            return False
+        try:
+            target = os.readlink(singleton_lock)
+        except OSError:
+            return False
+        try:
+            pid = int(target.rsplit("-", maxsplit=1)[1])
+        except (IndexError, ValueError):
+            return False
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            return True
+        return True
+
+    def _command_prefix(self) -> list[str]:
+        if self.settings.browser_display:
+            return ["env", f"DISPLAY={self.settings.browser_display}"]
+        if not self.settings.use_xvfb:
+            return ["env", "DISPLAY="]
+        return ["xvfb-run", "-a"]
+
+
+class SingleFileArchiver:
+    def __init__(self, settings: Settings) -> None:
+        self.settings = settings
+
+    async def archive(self, url: str, output_file: str) -> None:
+        archive_dir = self.settings.archive_dir
+        profile_dir = self.settings.browser_profile_dir
+        home_dir = self._browser_home_dir(profile_dir)
+        archive_dir.mkdir(parents=True, exist_ok=True)
+        home_dir.mkdir(parents=True, exist_ok=True)
+        profile_dir.mkdir(parents=True, exist_ok=True)
+        self._remove_stale_singleton_files(profile_dir)
+
+        output_path = archive_dir / output_file
+        command = self._command_prefix() + [
+            self.settings.single_file_path,
+            url,
+            str(output_path),
+            f"--browser-executable-path={self.settings.chrome_path}",
+            "--browser-headless=false",
+            "--browser-wait-until=load",
+            f"--browser-load-max-time={self.settings.browser_load_max_time_ms}",
+            f"--browser-capture-max-time={self.settings.browser_capture_max_time_ms}",
+            "--load-deferred-images=false",
+            "--browser-arg=--remote-debugging-address=127.0.0.1",
+            f"--browser-arg=--user-data-dir={profile_dir}",
+            "--browser-arg=--no-sandbox",
+            "--browser-arg=--disable-dev-shm-usage",
+            "--browser-arg=--disable-gpu",
+            "--browser-arg=--disable-crash-reporter",
+            "--browser-arg=--disable-crashpad",
+            f"--browser-wait-delay={self.settings.browser_wait_delay_ms}",
+            "--filename-conflict-action=overwrite",
+        ]
+        environment = {
+            **os.environ,
+            "HOME": str(home_dir),
+            "XDG_CONFIG_HOME": str(home_dir / ".config"),
+        }
+
+        process = await asyncio.create_subprocess_exec(
+            *command,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            env=environment,
+            start_new_session=True,
+        )
+        try:
+            stdout, stderr = await asyncio.wait_for(
+                process.communicate(),
+                timeout=self.settings.archive_timeout_seconds,
+            )
+        except TimeoutError as exc:
+            await self._stop_process_tree(process)
+            msg = "Archive timed out."
+            raise RuntimeError(msg) from exc
+
+        if process.returncode != 0:
+            output = "\n".join(
+                text
+                for text in (
+                    stdout.decode(errors="replace").strip(),
+                    stderr.decode(errors="replace").strip(),
+                )
+                if text
+            )
+            msg = output[-1000:] if output else "SingleFile failed."
+            raise RuntimeError(msg)
+
+        if not output_path.exists():
+            msg = "SingleFile finished without creating an archive file."
+            raise RuntimeError(msg)
+
+    def _remove_stale_singleton_files(self, profile_dir: Path) -> None:
+        singleton_files = list(profile_dir.glob("Singleton*"))
+        if not singleton_files:
+            return
+        singleton_lock = profile_dir / "SingletonLock"
+        if self._singleton_lock_is_active(singleton_lock):
+            return
+        for path in singleton_files:
+            path.unlink(missing_ok=True)
+
+    def _singleton_lock_is_active(self, singleton_lock: Path) -> bool:
+        if not singleton_lock.is_symlink():
+            return False
+        try:
+            target = os.readlink(singleton_lock)
+        except OSError:
+            return False
+        try:
+            pid = int(target.rsplit("-", maxsplit=1)[1])
+        except (IndexError, ValueError):
+            return False
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            return True
+        return True
+
+    def _browser_home_dir(self, profile_dir: Path) -> Path:
+        if profile_dir.parent.name == ".config":
+            return profile_dir.parent.parent
+        return profile_dir.parent
+
+    def _command_prefix(self) -> list[str]:
+        if self.settings.browser_display:
+            return ["env", f"DISPLAY={self.settings.browser_display}"]
+        if not self.settings.use_xvfb:
+            return ["env", "DISPLAY="]
+        return ["xvfb-run", "-a"]
+
+    async def _stop_process_tree(
+        self,
+        process: asyncio.subprocess.Process,
+    ) -> None:
+        self._signal_process_group(process, signal.SIGTERM)
+        try:
+            await asyncio.wait_for(process.communicate(), timeout=5)
+            return
+        except TimeoutError:
+            self._signal_process_group(process, signal.SIGKILL)
+        with suppress(TimeoutError, ProcessLookupError):
+            await asyncio.wait_for(process.communicate(), timeout=5)
+
+    def _signal_process_group(
+        self,
+        process: asyncio.subprocess.Process,
+        sig: signal.Signals,
+    ) -> None:
+        with suppress(ProcessLookupError):
+            os.killpg(process.pid, sig)
+
+
+class YtDlpDownloader:
+    def __init__(self, settings: Settings) -> None:
+        self.settings = settings
+
+    async def download(self, url: str, output_stem: str) -> list[str]:
+        archive_dir = self.settings.archive_dir
+        archive_dir.mkdir(parents=True, exist_ok=True)
+        output_template = archive_dir / f"{output_stem}.%(ext)s"
+        existing_files = set(archive_dir.glob(f"{output_stem}.*"))
+
+        command = [
+            self.settings.yt_dlp_path,
+            "--no-playlist",
+            "--js-runtimes",
+            "node",
+            "--cookies-from-browser",
+            f"chrome:{self.settings.browser_profile_dir}",
+            "--no-progress",
+            "--no-part",
+            "--restrict-filenames",
+            "--format",
+            "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/bv*+ba/b",
+            "--merge-output-format",
+            "mp4",
+            "--remux-video",
+            "mp4",
+            "--no-keep-video",
+            "--write-description",
+            "--write-info-json",
+            "--write-subs",
+            "--write-thumbnail",
+            "--output",
+            str(output_template),
+            url,
+        ]
+        process = await asyncio.create_subprocess_exec(
+            *command,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            start_new_session=True,
+        )
+        try:
+            stdout, stderr = await asyncio.wait_for(
+                process.communicate(),
+                timeout=self.settings.video_download_timeout_seconds,
+            )
+        except TimeoutError as exc:
+            await self._stop_process_tree(process)
+            self._remove_created_files(archive_dir, output_stem, existing_files)
+            msg = "Video download timed out."
+            raise RuntimeError(msg) from exc
+
+        if process.returncode != 0:
+            self._remove_created_files(archive_dir, output_stem, existing_files)
+            output = "\n".join(
+                text
+                for text in (
+                    stdout.decode(errors="replace").strip(),
+                    stderr.decode(errors="replace").strip(),
+                )
+                if text
+            )
+            msg = output[-1000:] if output else "yt-dlp failed."
+            if self._is_http_4xx_error(msg):
+                raise BrowserLoginRequiredError(self._browser_login_message(msg))
+            raise RuntimeError(msg)
+
+        created_files = [
+            path
+            for path in archive_dir.glob(f"{output_stem}.*")
+            if (
+                path not in existing_files
+                and path.is_file()
+                and path.suffix not in {".part", ".ytdl"}
+                and not self._is_user_uploaded_file(output_stem, path)
+            )
+        ]
+        if not created_files:
+            msg = "yt-dlp finished without creating a video file."
+            raise RuntimeError(msg)
+        return [path.name for path in sorted(created_files, key=lambda path: path.name)]
+
+    def _remove_created_files(
+        self,
+        archive_dir: Path,
+        output_stem: str,
+        existing_files: set[Path],
+    ) -> None:
+        for path in archive_dir.glob(f"{output_stem}.*"):
+            if (
+                path not in existing_files
+                and path.is_file()
+                and path.suffix != ".html"
+                and not self._is_user_uploaded_file(output_stem, path)
+            ):
+                path.unlink(missing_ok=True)
+
+    def _is_user_uploaded_file(self, output_stem: str, path: Path) -> bool:
+        return path.name.startswith(f"{output_stem}.upload-")
+
+    def _is_http_4xx_error(self, output: str) -> bool:
+        return any(
+            f"HTTP Error {code}" in output
+            or f"HTTPError {code}" in output
+            or f"status code {code}" in output.lower()
+            for code in range(400, 500)
+        )
+
+    def _browser_login_message(self, output: str) -> str:
+        lines = [" ".join(line.split()) for line in output.splitlines() if line.strip()]
+        selected = next(
+            (
+                line
+                for line in reversed(lines)
+                if "HTTP Error 4" in line or "HTTPError 4" in line
+            ),
+            lines[-1] if lines else "",
+        )
+        cleaned = selected.removeprefix("ERROR:").strip()
+        if len(cleaned) > 140:
+            cleaned = f"{cleaned[:140]}..."
+        if cleaned:
+            return f"浏览器登录需手动确认：{cleaned}"
+        return "浏览器登录需手动确认"
+
+    async def _stop_process_tree(
+        self,
+        process: asyncio.subprocess.Process,
+    ) -> None:
+        self._signal_process_group(process, signal.SIGTERM)
+        try:
+            await asyncio.wait_for(process.communicate(), timeout=5)
+            return
+        except TimeoutError:
+            self._signal_process_group(process, signal.SIGKILL)
+        with suppress(TimeoutError, ProcessLookupError):
+            await asyncio.wait_for(process.communicate(), timeout=5)
+
+    def _signal_process_group(
+        self,
+        process: asyncio.subprocess.Process,
+        sig: signal.Signals,
+    ) -> None:
+        with suppress(ProcessLookupError):
+            os.killpg(process.pid, sig)

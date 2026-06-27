@@ -1,0 +1,70 @@
+services:
+  db:
+    image: pgvector/pgvector:0.8.3-pg18-bookworm
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${READER_POSTGRES_DB:-reader}
+      POSTGRES_USER: ${READER_POSTGRES_USER:-reader}
+      POSTGRES_PASSWORD: ${READER_POSTGRES_PASSWORD:-reader}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    volumes:
+      - ${READER_POSTGRES_DIR:-./data/postgres}:/var/lib/postgresql/data
+
+  archive-desktop:
+    build:
+      context: .
+      args:
+        SINGLE_FILE_CLI_VERSION: ${SINGLE_FILE_CLI_VERSION:-2.0.83}
+        YT_DLP_VERSION: ${YT_DLP_VERSION:-2026.06.09}
+    image: reader/archive-desktop:latest
+    platform: linux/amd64
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PUID: ${READER_DESKTOP_PUID:-1000}
+      PGID: ${READER_DESKTOP_PGID:-1000}
+      TZ: Asia/Shanghai
+      TITLE: Reader Archive Desktop
+      SUBFOLDER: /browser/
+      PIXELFLUX_WAYLAND: "false"
+      SELKIES_USE_CPU: "true"
+      START_DOCKER: "false"
+      READER_DATABASE_URL: postgresql+psycopg://${READER_POSTGRES_USER:-reader}:${READER_POSTGRES_PASSWORD:-reader}@db:5432/${READER_POSTGRES_DB:-reader}
+      READER_SECRET_KEY: ${READER_SECRET_KEY:-change-this-reader-secret-key-for-local-development}
+      READER_ARCHIVE_DIR: /app/data/archive
+      READER_BROWSER_PROFILE_DIR: /app/data/browser/config/.config/singlefile-api
+      READER_SINGLE_FILE_PATH: /usr/local/bin/single-file
+      READER_YT_DLP_PATH: /usr/local/bin/yt-dlp
+      READER_CHROME_PATH: /usr/bin/google-chrome
+      READER_USE_XVFB: "false"
+      READER_BROWSER_DISPLAY: ":1"
+      READER_BROWSER_WAIT_DELAY_MS: ${READER_BROWSER_WAIT_DELAY_MS:-2000}
+      READER_BROWSER_LOAD_MAX_TIME_MS: ${READER_BROWSER_LOAD_MAX_TIME_MS:-20000}
+      READER_BROWSER_CAPTURE_MAX_TIME_MS: ${READER_BROWSER_CAPTURE_MAX_TIME_MS:-60000}
+      READER_DESKTOP_URL: /browser/
+      READER_DESKTOP_PROXY_PATH: /browser/
+      READER_DESKTOP_UPSTREAM: http://127.0.0.1:3000
+      READER_BOOTSTRAP_ADMIN_USERNAME: ${READER_BOOTSTRAP_ADMIN_USERNAME:-admin}
+      READER_BOOTSTRAP_ADMIN_PASSWORD: ${READER_BOOTSTRAP_ADMIN_PASSWORD:-change-me}
+      READER_SESSION_DAYS: ${READER_SESSION_DAYS:-30}
+      READER_COOKIE_SECURE: ${READER_COOKIE_SECURE:-false}
+      READER_ARCHIVE_TIMEOUT_SECONDS: ${READER_ARCHIVE_TIMEOUT_SECONDS:-120}
+      READER_VIDEO_DOWNLOAD_TIMEOUT_SECONDS: ${READER_VIDEO_DOWNLOAD_TIMEOUT_SECONDS:-600}
+      READER_RSS_REFRESH_INTERVAL_SECONDS: ${READER_RSS_REFRESH_INTERVAL_SECONDS:-1800}
+      READER_RSS_REQUEST_TIMEOUT_SECONDS: ${READER_RSS_REQUEST_TIMEOUT_SECONDS:-20}
+      READER_SEMANTIC_SEARCH_ENABLED: ${READER_SEMANTIC_SEARCH_ENABLED:-true}
+    volumes:
+      - ./data:/app/data
+      - ${READER_BROWSER_PROFILE_DIR:-./data/browser/config}:/config
+      - ${READER_ARCHIVE_DIR:-./data/archive}:/config/Downloads
+    ports:
+      - ${READER_API_PORT:-38165}:8000
+    shm_size: "1gb"
+    restart: unless-stopped

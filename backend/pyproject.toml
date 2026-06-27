@@ -1,0 +1,51 @@
+[project]
+name = "reader-archive-api"
+version = "0.1.0"
+description = "FastAPI service for scheduling SingleFile archive jobs."
+requires-python = ">=3.12"
+license = "Apache-2.0"
+dependencies = [
+  "alembic>=1.14.0",
+  "certifi>=2026.5.20",
+  "fastapi>=0.115.0",
+  "feedparser>=6.0.11",
+  "pwdlib[argon2,bcrypt]>=0.3.0",
+  "pydantic-settings>=2.6.0",
+  "psycopg[binary]>=3.2.0",
+  "pyjwt>=2.8.0",
+  "python-multipart>=0.0.20",
+  "sqlalchemy>=2.0.36",
+  "sqlmodel>=0.0.21",
+  "uvicorn[standard]>=0.32.0",
+  "fastembed>=0.8.0",
+  "trafilatura>=2.1.0",
+]
+
+[project.optional-dependencies]
+test = [
+  "httpx>=0.27.0",
+  "mypy>=1.13.0",
+  "pytest>=8.0.0",
+  "pytest-asyncio>=0.24.0",
+  "ruff>=0.8.0",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+ignore = ["B008", "E501"]
+
+[tool.mypy]
+python_version = "3.12"
+plugins = []
+ignore_missing_imports = true
+check_untyped_defs = true
+warn_unused_ignores = false
+disable_error_code = ["arg-type", "assignment"]

@@ -1,0 +1,74 @@
+services:
+  eval-db:
+    image: pgvector/pgvector:0.8.3-pg18-bookworm
+    container_name: reader-eval-db
+    restart: unless-stopped
+    user: "${READER_DESKTOP_PUID:-1000}:${READER_DESKTOP_PGID:-1000}"
+    environment:
+      POSTGRES_DB: reader
+      POSTGRES_USER: reader
+      POSTGRES_PASSWORD: reader
+      PGDATA: /var/lib/postgresql/data/pgdata
+      PGHOST: /tmp
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    volumes:
+      - ./.local_eval/reader-semantic/data/postgres:/var/lib/postgresql/data
+    command: ["postgres", "-c", "unix_socket_directories=/tmp"]
+
+  eval-archive-desktop:
+    build:
+      context: .
+      args:
+        SINGLE_FILE_CLI_VERSION: ${SINGLE_FILE_CLI_VERSION:-2.0.83}
+        YT_DLP_VERSION: ${YT_DLP_VERSION:-2026.06.09}
+    image: reader/archive-desktop:latest
+    platform: linux/amd64
+    container_name: reader-eval-archive-desktop
+    depends_on:
+      eval-db:
+        condition: service_healthy
+    environment:
+      PUID: ${READER_DESKTOP_PUID:-1000}
+      PGID: ${READER_DESKTOP_PGID:-1000}
+      TZ: Asia/Shanghai
+      TITLE: Reader Semantic Eval
+      SUBFOLDER: /browser/
+      PIXELFLUX_WAYLAND: "false"
+      SELKIES_USE_CPU: "true"
+      START_DOCKER: "false"
+      READER_DATABASE_URL: postgresql+psycopg://reader:reader@eval-db:5432/reader
+      READER_ARCHIVE_DIR: /app/eval-data/archive
+      READER_BROWSER_PROFILE_DIR: /config/.config/singlefile-api
+      READER_SINGLE_FILE_PATH: /usr/local/bin/single-file
+      READER_YT_DLP_PATH: /usr/local/bin/yt-dlp
+      READER_CHROME_PATH: /usr/bin/google-chrome
+      READER_USE_XVFB: "false"
+      READER_BROWSER_DISPLAY: ":1"
+      READER_BROWSER_WAIT_DELAY_MS: ${READER_BROWSER_WAIT_DELAY_MS:-2000}
+      READER_BROWSER_LOAD_MAX_TIME_MS: ${READER_BROWSER_LOAD_MAX_TIME_MS:-20000}
+      READER_BROWSER_CAPTURE_MAX_TIME_MS: ${READER_BROWSER_CAPTURE_MAX_TIME_MS:-60000}
+      READER_DESKTOP_URL: /browser/
+      READER_DESKTOP_PROXY_PATH: /browser/
+      READER_DESKTOP_UPSTREAM: http://127.0.0.1:3000
+      READER_BOOTSTRAP_ADMIN_USERNAME: admin
+      READER_BOOTSTRAP_ADMIN_PASSWORD: change-me
+      READER_SESSION_DAYS: "30"
+      READER_COOKIE_SECURE: "false"
+      READER_ARCHIVE_TIMEOUT_SECONDS: "120"
+      READER_VIDEO_DOWNLOAD_TIMEOUT_SECONDS: "600"
+      READER_RSS_REFRESH_INTERVAL_SECONDS: "1800"
+      READER_RSS_REQUEST_TIMEOUT_SECONDS: "20"
+    volumes:
+      - ./.local_eval/reader-semantic/data/app:/app/eval-data
+      - ./.local_eval/reader-semantic/data/browser/config:/config
+      - ./.local_eval/reader-semantic/data/archive:/config/Downloads
+      - ./.local_eval/reader-semantic/results:/app/eval-results
+    ports:
+      - "38166:8000"
+    shm_size: "1gb"
+    restart: unless-stopped
