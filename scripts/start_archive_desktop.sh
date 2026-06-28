@@ -6,4 +6,4 @@ if [ ! -f .env ]; then
 fi
 
 mkdir -p data/browser/config data/archive
-docker compose up -d archive-desktop
+docker compose -f compose.yaml -f compose.build.yaml up -d archive-desktop

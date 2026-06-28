@@ -1,0 +1,11 @@
+services:
+  archive-desktop:
+    build:
+      context: .
+      args:
+        SINGLE_FILE_CLI_VERSION: ${SINGLE_FILE_CLI_VERSION:-2.0.83}
+        YT_DLP_VERSION: ${YT_DLP_VERSION:-2026.06.09}
+    image: ${READER_IMAGE:-reader/archive-desktop:latest}
+
+volumes:
+  reader_verify_postgres:

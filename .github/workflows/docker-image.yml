@@ -1,0 +1,116 @@
+name: CI and Docker image
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docker-image-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: raikiriww/readerarchive
+
+jobs:
+  docker:
+    name: Verify and publish Docker image
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=ref,event=tag
+            type=semver,pattern={{version}}
+            type=sha,prefix=sha-
+
+      - name: Validate Compose files
+        run: |
+          docker compose config >/dev/null
+          docker compose -f compose.yaml -f compose.build.yaml config >/dev/null
+
+      - name: Build local verification image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          push: false
+          tags: reader/archive-desktop:ci
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Run Docker verification
+        env:
+          READER_IMAGE: reader/archive-desktop:ci
+          READER_VERIFY_SKIP_BUILD: "true"
+        run: scripts/verify_in_docker.sh
+
+      - name: Stop verification containers
+        if: always()
+        run: docker compose -f compose.yaml -f compose.build.yaml down -v
+
+      - name: Log in to GHCR
+        if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Tag and push verified image
+        if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
+        env:
+          PUBLISH_TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          while IFS= read -r tag; do
+            [ -n "$tag" ] || continue
+            docker tag reader/archive-desktop:ci "$tag"
+            docker push "$tag"
+          done <<EOF
+          $PUBLISH_TAGS
+          EOF
+
+      - name: Check anonymous image access
+        if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
+        env:
+          GITHUB_REF_TYPE: ${{ github.ref_type }}
+          GITHUB_REF_NAME: ${{ github.ref_name }}
+        run: |
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            check_tag="$GITHUB_REF_NAME"
+          else
+            check_tag="latest"
+          fi
+
+          docker logout "$REGISTRY"
+
+          if ! docker manifest inspect "$REGISTRY/$IMAGE_NAME:$check_tag" >/dev/null; then
+            echo "::error::Published image $REGISTRY/$IMAGE_NAME:$check_tag is not anonymously accessible. Open the GitHub package settings for readerarchive and change visibility to Public, then rerun this workflow."
+            exit 1
+          fi

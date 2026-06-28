@@ -1,4 +1,4 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-docker compose stop archive-desktop
+docker compose -f compose.yaml -f compose.build.yaml stop archive-desktop

@@ -17,12 +17,7 @@ services:
       - ${READER_POSTGRES_DIR:-./data/postgres}:/var/lib/postgresql/data
 
   archive-desktop:
-    build:
-      context: .
-      args:
-        SINGLE_FILE_CLI_VERSION: ${SINGLE_FILE_CLI_VERSION:-2.0.83}
-        YT_DLP_VERSION: ${YT_DLP_VERSION:-2026.06.09}
-    image: reader/archive-desktop:latest
+    image: ${READER_IMAGE:-ghcr.io/raikiriww/readerarchive:latest}
     platform: linux/amd64
     depends_on:
       db:
@@ -61,7 +56,7 @@ services:
       READER_RSS_REQUEST_TIMEOUT_SECONDS: ${READER_RSS_REQUEST_TIMEOUT_SECONDS:-20}
       READER_SEMANTIC_SEARCH_ENABLED: ${READER_SEMANTIC_SEARCH_ENABLED:-true}
     volumes:
-      - ./data:/app/data
+      - ${READER_APP_DATA_DIR:-./data}:/app/data
       - ${READER_BROWSER_PROFILE_DIR:-./data/browser/config}:/config
       - ${READER_ARCHIVE_DIR:-./data/archive}:/config/Downloads
     ports:

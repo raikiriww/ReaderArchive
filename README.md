@@ -38,16 +38,18 @@ The image currently builds for `linux/amd64`. On Apple Silicon, Docker will run 
 
 ## Quick Start
 
-Copy the example environment file:
+Create a folder for Reader Archive:
 
 ```bash
-cp .env.example .env
+mkdir reader-archive
+cd reader-archive
 ```
 
-Create the local data directories:
+Download the Compose file and environment template:
 
 ```bash
-mkdir -p data/archive data/browser/config data/postgres
+curl -L -o compose.yaml https://raw.githubusercontent.com/raikiriww/ReaderArchive/main/compose.yaml
+curl -L -o .env https://raw.githubusercontent.com/raikiriww/ReaderArchive/main/.env.example
 ```
 
 Edit `.env` before exposing the app beyond your own machine:
@@ -57,7 +59,12 @@ READER_POSTGRES_PASSWORD=change-this-database-password
 READER_SECRET_KEY=change-this-reader-secret-key
 READER_BOOTSTRAP_ADMIN_USERNAME=admin
 READER_BOOTSTRAP_ADMIN_PASSWORD=change-this-admin-password
-READER_POSTGRES_DIR=./data/postgres
+```
+
+Create the local data directories:
+
+```bash
+mkdir -p data/archive data/browser/config data/postgres
 ```
 
 On Linux, also set the desktop file owner values in `.env` to your numeric user
@@ -79,6 +86,7 @@ openssl rand -hex 32
 Start the app:
 
 ```bash
+docker compose pull
 docker compose up -d
 ```
 
@@ -123,10 +131,12 @@ Common settings in `.env`:
 
 ```bash
 READER_API_PORT=38165
+READER_IMAGE=ghcr.io/raikiriww/readerarchive:latest
 READER_POSTGRES_PASSWORD=change-this-database-password
 READER_SECRET_KEY=change-this-reader-secret-key
 READER_BOOTSTRAP_ADMIN_USERNAME=admin
 READER_BOOTSTRAP_ADMIN_PASSWORD=change-this-admin-password
+READER_APP_DATA_DIR=./data
 READER_ARCHIVE_DIR=./data/archive
 READER_BROWSER_PROFILE_DIR=./data/browser/config
 READER_POSTGRES_DIR=./data/postgres
@@ -149,20 +159,53 @@ READER_DESKTOP_PGID=1000
 
 ## Verification
 
-Run the full Docker verification:
+Run the full Docker verification from a source checkout:
 
 ```bash
 scripts/verify_in_docker.sh
 ```
 
-The script rebuilds the image, restarts the containers, checks the API, runs backend tests in Docker, regenerates the frontend client in Docker, runs frontend checks in Docker, runs frontend tests in Docker, and leaves the project containers running.
+The script builds the image with `compose.build.yaml`, restarts the containers, checks the API, runs backend tests in Docker, regenerates the frontend client in Docker, runs frontend checks in Docker, runs frontend tests in Docker, and leaves the project containers running.
+
+## Building From Source
+
+The default `compose.yaml` is for users and pulls the published image. To build locally from a source checkout, include the build override:
+
+```bash
+docker compose -f compose.yaml -f compose.build.yaml build archive-desktop
+docker compose -f compose.yaml -f compose.build.yaml up -d
+```
+
+You can override tool versions while building:
+
+```bash
+SINGLE_FILE_CLI_VERSION=2.0.83 YT_DLP_VERSION=2026.06.09 \
+  docker compose -f compose.yaml -f compose.build.yaml build archive-desktop
+```
+
+Published images are built for `linux/amd64` and pushed to:
+
+```text
+ghcr.io/raikiriww/readerarchive
+```
+
+## Releases
+
+Docker images are published by GitHub Actions after the Docker verification
+passes. Version tags such as `v0.1.0` publish both `v0.1.0` and `0.1.0` image
+tags. The `main` branch publishes `latest`.
+
+After the first successful release, open the `readerarchive` package in GitHub
+Packages and change its visibility to public. The release workflow checks
+anonymous image access and fails with a clear message if the package is still
+private.
 
 ## Updating
 
-Pull the latest code, then rebuild and restart:
+Pull the latest image and restart:
 
 ```bash
-docker compose build archive-desktop
+docker compose pull
 docker compose up -d
 ```
 

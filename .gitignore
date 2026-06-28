@@ -16,3 +16,4 @@ data/archive/
 data/browser/
 data/postgres/
 .local_eval/
+.local_verify/
