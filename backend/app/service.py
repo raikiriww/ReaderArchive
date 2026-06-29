@@ -409,9 +409,12 @@ class ArchiveTaskService:
                     entry_key = entry.entry_key or rss_entry_key_from_url(entry.normalized_url)
                     if self.repository.rss_entry_exists(feed.feed_id, entry_key):
                         continue
-                    if entry_key == rss_entry_key_from_url(
-                        entry.normalized_url
-                    ) and self.repository.archive_task_exists_for_normalized_url(entry.normalized_url):
+                    if (
+                        not entry.allow_repeated_url
+                        and self.repository.archive_task_exists_for_normalized_url(
+                            entry.normalized_url
+                        )
+                    ):
                         continue
                     task = await self.create_task(
                         entry.url,
