@@ -30,6 +30,7 @@ class ParsedFeedEntry:
     normalized_url: str
     published_at: str | None
     entry_key: str = ""
+    allow_repeated_url: bool = False
 
 
 @dataclass(frozen=True)
@@ -62,6 +63,8 @@ class RssFeedFetcher:
             raise RuntimeError(msg)
 
         feed_title = _clean_text(parsed.feed.get("title")) if parsed.feed else None
+        feed_site_url = _feed_site_url(parsed.feed, final_url) if parsed.feed else None
+        normalized_feed_site_url = normalize_article_url(feed_site_url) if feed_site_url else ""
         entries = []
         seen: set[str] = set()
         for entry in parsed.entries:
@@ -69,7 +72,10 @@ class RssFeedFetcher:
             if not url:
                 continue
             normalized_url = normalize_article_url(url)
-            entry_key = rss_entry_key(entry, normalized_url)
+            allow_repeated_url = bool(
+                normalized_feed_site_url and normalized_url == normalized_feed_site_url
+            )
+            entry_key = rss_entry_key(entry, normalized_url, use_published_at=allow_repeated_url)
             if entry_key in seen:
                 continue
             seen.add(entry_key)
@@ -80,6 +86,7 @@ class RssFeedFetcher:
                     normalized_url=normalized_url,
                     published_at=_entry_datetime(entry),
                     entry_key=entry_key,
+                    allow_repeated_url=allow_repeated_url,
                 )
             )
         return ParsedFeed(title=feed_title, entries=entries)
@@ -126,15 +133,19 @@ def rss_entry_key(
     *,
     published_at: str | None = None,
     title: str | None = None,
+    use_published_at: bool = False,
 ) -> str:
     entry = entry or {}
+    published_value = published_at or _entry_datetime_from_keys(entry, ("published", "created"))
+    if use_published_at and published_value:
+        return f"published:{normalized_url}|{published_value}"
+
     clean_guid = _clean_text(entry.get("id") or entry.get("guid"))
     if clean_guid:
         return f"id:{clean_guid}"
 
-    published_value = published_at or _entry_datetime_from_keys(entry, ("published", "created"))
-    if published_value:
-        return f"published:{normalized_url}|{published_value}"
+    if normalized_url:
+        return rss_entry_key_from_url(normalized_url)
 
     clean_title = _clean_text(title if title is not None else entry.get("title"))
     if clean_title:
@@ -154,6 +165,23 @@ def _entry_url(entry: dict[str, Any], base_url: str) -> str | None:
     links = entry.get("links") or []
     for item in links:
         href = item.get("href") if isinstance(item, dict) else None
+        if href:
+            return urljoin(base_url, str(href).strip())
+    return None
+
+
+def _feed_site_url(feed: dict[str, Any], base_url: str) -> str | None:
+    link = feed.get("link")
+    if isinstance(link, str) and link.strip():
+        return urljoin(base_url, link.strip())
+    links = feed.get("links") or []
+    for item in links:
+        if not isinstance(item, dict):
+            continue
+        rel = str(item.get("rel") or "").lower()
+        if rel and rel != "alternate":
+            continue
+        href = item.get("href")
         if href:
             return urljoin(base_url, str(href).strip())
     return None

@@ -1985,6 +1985,68 @@ def test_rss_feed_adds_all_current_entries_and_skips_duplicates(
         assert refresh_response.json()["created_task_count"] == 0
 
 
+def test_rss_feed_refresh_skips_existing_normal_url_even_with_published_key(
+    tmp_path: Path,
+    fake_single_file: Path,
+    fake_failing_yt_dlp: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    normalized_url = "https://example.com/already-saved"
+    parsed_feed = ParsedFeed(
+        title="Normal Feed",
+        entries=[
+            ParsedFeedEntry(
+                title="Already Saved",
+                url=normalized_url,
+                normalized_url=normalized_url,
+                published_at="2026-06-29T00:00:00+00:00",
+                entry_key=rss_entry_key(
+                    normalized_url=normalized_url,
+                    published_at="2026-06-29T00:00:00+00:00",
+                    use_published_at=True,
+                ),
+            )
+        ],
+    )
+
+    class FakeFetcher:
+        def __init__(self, timeout_seconds: int) -> None:
+            self.timeout_seconds = timeout_seconds
+
+        def fetch(self, url: str) -> ParsedFeed:
+            return parsed_feed
+
+    monkeypatch.setattr("app.service.RssFeedFetcher", FakeFetcher)
+    settings = Settings(
+        database_url=make_database_url(),
+        archive_dir=tmp_path / "archive",
+        browser_profile_dir=tmp_path / "profile",
+        single_file_path=str(fake_single_file),
+        yt_dlp_path=str(fake_failing_yt_dlp),
+        use_xvfb=False,
+        rss_refresh_interval_seconds=3600,
+    )
+    app = create_app(settings)
+
+    with TestClient(app) as client:
+        login_as_admin(client)
+        task_response = client.post("/api/v1/archive-tasks", json={"url": normalized_url})
+        assert task_response.status_code == 202
+
+        response = client.post(
+            "/api/v1/rss-feeds",
+            json={"url": "https://example.com/feed.xml"},
+        )
+        assert response.status_code == 201
+        body = response.json()
+        assert body["discovered_count"] == 1
+        assert body["created_task_count"] == 0
+
+        task_page = list_archive_task_page(client)
+        assert task_page["total"] == 1
+        assert task_page["items"][0]["url"] == normalized_url
+
+
 def test_rss_feed_refresh_archives_new_dated_entry_with_same_url(
     tmp_path: Path,
     fake_single_file: Path,
@@ -2004,7 +2066,9 @@ def test_rss_feed_refresh_archives_new_dated_entry_with_same_url(
                     entry_key=rss_entry_key(
                         normalized_url=normalized_url,
                         published_at="2026-06-28T00:00:00+00:00",
+                        use_published_at=True,
                     ),
+                    allow_repeated_url=True,
                 )
             ],
         ),
@@ -2019,7 +2083,9 @@ def test_rss_feed_refresh_archives_new_dated_entry_with_same_url(
                     entry_key=rss_entry_key(
                         normalized_url=normalized_url,
                         published_at="2026-06-29T00:00:00+00:00",
+                        use_published_at=True,
                     ),
+                    allow_repeated_url=True,
                 )
             ],
         ),
