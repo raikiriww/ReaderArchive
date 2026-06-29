@@ -17,7 +17,7 @@ from sqlmodel import Session
 from app.core.config import Settings
 from app.core.db import get_engine
 from app.main import create_app
-from app.rss import ParsedFeed, ParsedFeedEntry
+from app.rss import ParsedFeed, ParsedFeedEntry, rss_entry_key
 from app.semantic import SemanticDocumentPreparer
 
 CREATED_DATABASES: list[tuple[str, str]] = []
@@ -1983,6 +1983,88 @@ def test_rss_feed_adds_all_current_entries_and_skips_duplicates(
         refresh_response = client.post(f"/api/v1/rss-feeds/{body['feed']['feed_id']}/refresh")
         assert refresh_response.status_code == 200
         assert refresh_response.json()["created_task_count"] == 0
+
+
+def test_rss_feed_refresh_archives_new_dated_entry_with_same_url(
+    tmp_path: Path,
+    fake_single_file: Path,
+    fake_failing_yt_dlp: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    normalized_url = "https://readhub.cn/daily"
+    feeds = [
+        ParsedFeed(
+            title="Readhub 每日早报",
+            entries=[
+                ParsedFeedEntry(
+                    title="Readhub 每日早报",
+                    url=normalized_url,
+                    normalized_url=normalized_url,
+                    published_at="2026-06-28T00:00:00+00:00",
+                    entry_key=rss_entry_key(
+                        normalized_url=normalized_url,
+                        published_at="2026-06-28T00:00:00+00:00",
+                    ),
+                )
+            ],
+        ),
+        ParsedFeed(
+            title="Readhub 每日早报",
+            entries=[
+                ParsedFeedEntry(
+                    title="Readhub 每日早报",
+                    url=normalized_url,
+                    normalized_url=normalized_url,
+                    published_at="2026-06-29T00:00:00+00:00",
+                    entry_key=rss_entry_key(
+                        normalized_url=normalized_url,
+                        published_at="2026-06-29T00:00:00+00:00",
+                    ),
+                )
+            ],
+        ),
+    ]
+
+    class FakeFetcher:
+        calls = 0
+
+        def __init__(self, timeout_seconds: int) -> None:
+            self.timeout_seconds = timeout_seconds
+
+        def fetch(self, url: str) -> ParsedFeed:
+            feed = feeds[min(self.__class__.calls, len(feeds) - 1)]
+            self.__class__.calls += 1
+            return feed
+
+    monkeypatch.setattr("app.service.RssFeedFetcher", FakeFetcher)
+    settings = Settings(
+        database_url=make_database_url(),
+        archive_dir=tmp_path / "archive",
+        browser_profile_dir=tmp_path / "profile",
+        single_file_path=str(fake_single_file),
+        yt_dlp_path=str(fake_failing_yt_dlp),
+        use_xvfb=False,
+        rss_refresh_interval_seconds=3600,
+    )
+    app = create_app(settings)
+
+    with TestClient(app) as client:
+        login_as_admin(client)
+        response = client.post(
+            "/api/v1/rss-feeds",
+            json={"url": "https://readhub.cn/daily/rss"},
+        )
+        assert response.status_code == 201
+        body = response.json()
+        assert body["created_task_count"] == 1
+
+        refresh_response = client.post(f"/api/v1/rss-feeds/{body['feed']['feed_id']}/refresh")
+        assert refresh_response.status_code == 200
+        assert refresh_response.json()["created_task_count"] == 1
+
+        task_page = list_archive_task_page(client)
+        assert task_page["total"] == 2
+        assert {task["url"] for task in task_page["items"]} == {normalized_url}
 
 
 def test_rss_feed_without_entry_title_uses_archived_page_title(

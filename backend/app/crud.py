@@ -1120,11 +1120,14 @@ class ArchiveTaskRepository:
             session.add(feed)
             session.commit()
 
-    def rss_entry_exists(self, normalized_url: str) -> bool:
+    def rss_entry_exists(self, feed_id: str, entry_key: str) -> bool:
         with self._session() as session:
             return (
                 session.exec(
-                    select(RssEntry.id).where(RssEntry.normalized_url == normalized_url)
+                    select(RssEntry.id).where(
+                        RssEntry.source_id == feed_id,
+                        RssEntry.entry_key == entry_key,
+                    )
                 ).first()
                 is not None
             )
@@ -1135,6 +1138,7 @@ class ArchiveTaskRepository:
         feed_id: str,
         url: str,
         normalized_url: str,
+        entry_key: str,
         title: str | None,
         published_at: str | None,
         archive_task_id: str,
@@ -1146,6 +1150,7 @@ class ArchiveTaskRepository:
                     source_id=feed_id,
                     url=url,
                     normalized_url=normalized_url,
+                    entry_key=entry_key,
                     title=title or "",
                     published_at=published_at,
                     discovered_at=utc_now(),
