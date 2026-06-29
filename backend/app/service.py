@@ -27,9 +27,17 @@ from app.models import (
     RssFeedRefreshResult,
     SemanticHealthRead,
 )
-from app.rss import RssFeedFetcher, normalize_article_url, title_from_url
-from app.semantic import LocalEmbeddingProvider, SemanticDocumentPreparer, semantic_texts_for_embedding
-
+from app.rss import (
+    RssFeedFetcher,
+    normalize_article_url,
+    rss_entry_key_from_url,
+    title_from_url,
+)
+from app.semantic import (
+    LocalEmbeddingProvider,
+    SemanticDocumentPreparer,
+    semantic_texts_for_embedding,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -398,11 +406,12 @@ class ArchiveTaskService:
                 parsed_feed = await asyncio.to_thread(fetcher.fetch, feed.url)
                 for entry in reversed(parsed_feed.entries):
                     discovered_count += 1
-                    if self.repository.rss_entry_exists(entry.normalized_url):
+                    entry_key = entry.entry_key or rss_entry_key_from_url(entry.normalized_url)
+                    if self.repository.rss_entry_exists(feed.feed_id, entry_key):
                         continue
-                    if self.repository.archive_task_exists_for_normalized_url(
-                        entry.normalized_url,
-                    ):
+                    if entry_key == rss_entry_key_from_url(
+                        entry.normalized_url
+                    ) and self.repository.archive_task_exists_for_normalized_url(entry.normalized_url):
                         continue
                     task = await self.create_task(
                         entry.url,
@@ -416,6 +425,7 @@ class ArchiveTaskService:
                         feed.feed_id,
                         entry.url,
                         entry.normalized_url,
+                        entry_key,
                         entry.title,
                         entry.published_at,
                         task.task_id,

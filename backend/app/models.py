@@ -154,11 +154,13 @@ class RssSource(SQLModel, table=True):
 
 class RssEntry(SQLModel, table=True):
     __tablename__ = "reader_rss_entries"
+    __table_args__ = (UniqueConstraint("source_id", "entry_key"),)
 
     id: str = Field(default_factory=new_id, primary_key=True)
     source_id: str = Field(index=True, foreign_key="reader_rss_sources.id")
     url: str
-    normalized_url: str = Field(index=True, unique=True)
+    normalized_url: str = Field(index=True)
+    entry_key: str = Field(index=True)
     title: str
     published_at: str | None = None
     discovered_at: datetime = Field(default_factory=utc_now)

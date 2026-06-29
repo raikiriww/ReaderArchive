@@ -29,6 +29,7 @@ class ParsedFeedEntry:
     url: str
     normalized_url: str
     published_at: str | None
+    entry_key: str = ""
 
 
 @dataclass(frozen=True)
@@ -68,15 +69,17 @@ class RssFeedFetcher:
             if not url:
                 continue
             normalized_url = normalize_article_url(url)
-            if normalized_url in seen:
+            entry_key = rss_entry_key(entry, normalized_url)
+            if entry_key in seen:
                 continue
-            seen.add(normalized_url)
+            seen.add(entry_key)
             entries.append(
                 ParsedFeedEntry(
                     title=_clean_text(entry.get("title")) or None,
                     url=url,
                     normalized_url=normalized_url,
                     published_at=_entry_datetime(entry),
+                    entry_key=entry_key,
                 )
             )
         return ParsedFeed(title=feed_title, entries=entries)
@@ -117,6 +120,33 @@ def title_from_url(url: str) -> str:
     return f"{parts.netloc}/{path}" if path else parts.netloc
 
 
+def rss_entry_key(
+    entry: dict[str, Any] | None = None,
+    normalized_url: str = "",
+    *,
+    published_at: str | None = None,
+    title: str | None = None,
+) -> str:
+    entry = entry or {}
+    clean_guid = _clean_text(entry.get("id") or entry.get("guid"))
+    if clean_guid:
+        return f"id:{clean_guid}"
+
+    published_value = published_at or _entry_datetime_from_keys(entry, ("published", "created"))
+    if published_value:
+        return f"published:{normalized_url}|{published_value}"
+
+    clean_title = _clean_text(title if title is not None else entry.get("title"))
+    if clean_title:
+        return f"title:{normalized_url}|{clean_title}"
+
+    return rss_entry_key_from_url(normalized_url)
+
+
+def rss_entry_key_from_url(normalized_url: str) -> str:
+    return f"url:{normalized_url}"
+
+
 def _entry_url(entry: dict[str, Any], base_url: str) -> str | None:
     link = entry.get("link")
     if isinstance(link, str) and link.strip():
@@ -130,7 +160,11 @@ def _entry_url(entry: dict[str, Any], base_url: str) -> str | None:
 
 
 def _entry_datetime(entry: dict[str, Any]) -> str | None:
-    for key in ("published", "updated", "created"):
+    return _entry_datetime_from_keys(entry, ("published", "updated", "created"))
+
+
+def _entry_datetime_from_keys(entry: dict[str, Any], keys: tuple[str, ...]) -> str | None:
+    for key in keys:
         value = entry.get(key)
         if not value:
             continue
