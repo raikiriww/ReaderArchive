@@ -28,13 +28,15 @@ services:
       TZ: Asia/Shanghai
       TITLE: Reader Archive Desktop
       SUBFOLDER: /browser/
+      CHROME_CLI: ${READER_CHROME_CLI:---remote-debugging-address=127.0.0.1 --remote-debugging-port=9222 --disk-cache-size=1 --media-cache-size=1 --disable-application-cache}
       PIXELFLUX_WAYLAND: "false"
       SELKIES_USE_CPU: "true"
       START_DOCKER: "false"
       READER_DATABASE_URL: postgresql+psycopg://${READER_POSTGRES_USER:-reader}:${READER_POSTGRES_PASSWORD:-reader}@db:5432/${READER_POSTGRES_DB:-reader}
       READER_SECRET_KEY: ${READER_SECRET_KEY:-change-this-reader-secret-key-for-local-development}
       READER_ARCHIVE_DIR: /app/data/archive
-      READER_BROWSER_PROFILE_DIR: /app/data/browser/config/.config/singlefile-api
+      READER_BROWSER_PROFILE_DIR: /config/.config/reader-archive-profile
+      READER_BROWSER_REMOTE_DEBUGGING_URL: ${READER_BROWSER_REMOTE_DEBUGGING_URL:-http://127.0.0.1:9222}
       READER_SINGLE_FILE_PATH: /usr/local/bin/single-file
       READER_YT_DLP_PATH: /usr/local/bin/yt-dlp
       READER_CHROME_PATH: /usr/bin/google-chrome

@@ -8,7 +8,7 @@ fi
 
 url="$1"
 output="${2:-archive-$(date +%Y%m%d-%H%M%S).html}"
-profile_dir="data/browser/config/.config/singlefile-chrome"
+remote_debugging_url="${READER_BROWSER_REMOTE_DEBUGGING_URL:-http://127.0.0.1:9222}"
 
 case "$output" in
   /*|*../*|../*)
@@ -17,18 +17,12 @@ case "$output" in
     ;;
 esac
 
-if [ -L "$profile_dir/SingletonSocket" ] && [ ! -e "$profile_dir/SingletonSocket" ]; then
-  rm -f "$profile_dir"/Singleton*
-fi
-
 docker compose exec -T -u abc archive-desktop \
   env DISPLAY=:1 HOME=/config \
   single-file "$url" "/config/Downloads/$output" \
-  --browser-executable-path=/usr/bin/google-chrome \
-  --browser-headless=false \
-  --browser-arg=--user-data-dir=/config/.config/singlefile-chrome \
-  --browser-arg=--no-sandbox \
-  --browser-arg=--disable-dev-shm-usage \
+  --browser-server="$remote_debugging_url" \
+  --http-header=Cache-Control=no-cache \
+  --http-header=Pragma=no-cache \
   --browser-wait-delay=2000 \
   --filename-conflict-action=overwrite
 

@@ -3,8 +3,11 @@ from __future__ import annotations
 import asyncio
 import os
 import signal
+import tempfile
 from contextlib import suppress
 from pathlib import Path
+from urllib.parse import quote
+from urllib.request import Request, urlopen
 
 from app.core.config import Settings
 
@@ -18,6 +21,10 @@ class BrowserOpener:
         self.settings = settings
 
     async def open(self, url: str) -> None:
+        if self.settings.browser_remote_debugging_url:
+            await asyncio.to_thread(self._open_remote_tab, url)
+            return
+
         profile_dir = self.settings.browser_profile_dir
         home_dir = self._browser_home_dir(profile_dir)
         home_dir.mkdir(parents=True, exist_ok=True)
@@ -61,6 +68,18 @@ class BrowserOpener:
             )
             msg = output[-1000:] if output else "Chrome failed to open the URL."
             raise RuntimeError(msg)
+
+    def _open_remote_tab(self, url: str) -> None:
+        remote_url = self.settings.browser_remote_debugging_url
+        assert remote_url is not None
+        endpoint = f"{remote_url.rstrip('/')}/json/new?{quote(url, safe='')}"
+        request = Request(endpoint, method="PUT")
+        try:
+            with urlopen(request, timeout=5) as response:
+                response.read()
+        except Exception as exc:
+            msg = "Chrome remote debugging endpoint is unavailable."
+            raise RuntimeError(msg) from exc
 
     def _browser_home_dir(self, profile_dir: Path) -> Path:
         if profile_dir.parent.name == ".config":
@@ -118,48 +137,35 @@ class SingleFileArchiver:
         self._remove_stale_singleton_files(profile_dir)
 
         output_path = archive_dir / output_file
-        command = self._command_prefix() + [
-            self.settings.single_file_path,
-            url,
-            str(output_path),
-            f"--browser-executable-path={self.settings.chrome_path}",
-            "--browser-headless=false",
-            "--browser-wait-until=load",
-            f"--browser-load-max-time={self.settings.browser_load_max_time_ms}",
-            f"--browser-capture-max-time={self.settings.browser_capture_max_time_ms}",
-            "--load-deferred-images=false",
-            "--browser-arg=--remote-debugging-address=127.0.0.1",
-            f"--browser-arg=--user-data-dir={profile_dir}",
-            "--browser-arg=--no-sandbox",
-            "--browser-arg=--disable-dev-shm-usage",
-            "--browser-arg=--disable-gpu",
-            "--browser-arg=--disable-crash-reporter",
-            "--browser-arg=--disable-crashpad",
-            f"--browser-wait-delay={self.settings.browser_wait_delay_ms}",
-            "--filename-conflict-action=overwrite",
-        ]
-        environment = {
-            **os.environ,
-            "HOME": str(home_dir),
-            "XDG_CONFIG_HOME": str(home_dir / ".config"),
-        }
-
-        process = await asyncio.create_subprocess_exec(
-            *command,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            env=environment,
-            start_new_session=True,
+        cache_context = (
+            suppress()
+            if self.settings.browser_remote_debugging_url
+            else tempfile.TemporaryDirectory(prefix="reader-singlefile-cache-")
         )
-        try:
-            stdout, stderr = await asyncio.wait_for(
-                process.communicate(),
-                timeout=self.settings.archive_timeout_seconds,
+        with cache_context as cache_dir:
+            command = self._archive_command(url, output_path, profile_dir, cache_dir)
+            environment = {
+                **os.environ,
+                "HOME": str(home_dir),
+                "XDG_CONFIG_HOME": str(home_dir / ".config"),
+            }
+
+            process = await asyncio.create_subprocess_exec(
+                *command,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                env=environment,
+                start_new_session=True,
             )
-        except TimeoutError as exc:
-            await self._stop_process_tree(process)
-            msg = "Archive timed out."
-            raise RuntimeError(msg) from exc
+            try:
+                stdout, stderr = await asyncio.wait_for(
+                    process.communicate(),
+                    timeout=self.settings.archive_timeout_seconds,
+                )
+            except TimeoutError as exc:
+                await self._stop_process_tree(process)
+                msg = "Archive timed out."
+                raise RuntimeError(msg) from exc
 
         if process.returncode != 0:
             output = "\n".join(
@@ -176,6 +182,50 @@ class SingleFileArchiver:
         if not output_path.exists():
             msg = "SingleFile finished without creating an archive file."
             raise RuntimeError(msg)
+
+    def _archive_command(
+        self,
+        url: str,
+        output_path: Path,
+        profile_dir: Path,
+        cache_dir: str | None,
+    ) -> list[str]:
+        command = self._command_prefix() + [
+            self.settings.single_file_path,
+            url,
+            str(output_path),
+            "--browser-wait-until=load",
+            f"--browser-load-max-time={self.settings.browser_load_max_time_ms}",
+            f"--browser-capture-max-time={self.settings.browser_capture_max_time_ms}",
+            "--load-deferred-images=false",
+            "--http-header=Cache-Control=no-cache",
+            "--http-header=Pragma=no-cache",
+            f"--browser-wait-delay={self.settings.browser_wait_delay_ms}",
+            "--filename-conflict-action=overwrite",
+        ]
+        if self.settings.browser_remote_debugging_url:
+            command.append(f"--browser-server={self.settings.browser_remote_debugging_url}")
+            return command
+
+        command.extend(
+            [
+                f"--browser-executable-path={self.settings.chrome_path}",
+                "--browser-headless=false",
+                "--browser-arg=--remote-debugging-address=127.0.0.1",
+                f"--browser-arg=--user-data-dir={profile_dir}",
+                f"--browser-arg=--disk-cache-dir={cache_dir}",
+                "--browser-arg=--disk-cache-size=1",
+                "--browser-arg=--media-cache-size=1",
+                "--browser-arg=--disable-cache",
+                "--browser-arg=--disable-application-cache",
+                "--browser-arg=--no-sandbox",
+                "--browser-arg=--disable-dev-shm-usage",
+                "--browser-arg=--disable-gpu",
+                "--browser-arg=--disable-crash-reporter",
+                "--browser-arg=--disable-crashpad",
+            ],
+        )
+        return command
 
     def _remove_stale_singleton_files(self, profile_dir: Path) -> None:
         singleton_files = list(profile_dir.glob("Singleton*"))

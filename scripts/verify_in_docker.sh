@@ -70,6 +70,19 @@ for attempt in $(seq 1 60); do
   sleep 2
 done
 
+echo "==> Checking Chrome remote debugging endpoint"
+docker_compose exec -T "$SERVICE" bash -lc '
+url="${READER_BROWSER_REMOTE_DEBUGGING_URL:-http://127.0.0.1:9222}"
+for attempt in $(seq 1 60); do
+  if curl -fsS "$url/json/version" >/dev/null; then
+    exit 0
+  fi
+  sleep 2
+done
+echo "Chrome remote debugging check failed: $url/json/version" >&2
+exit 1
+'
+
 echo "==> Installing test dependencies inside the running container"
 docker_compose exec -T "$SERVICE" \
   env -u VIRTUAL_ENV UV_COMPILE_BYTECODE=0 UV_PROJECT_ENVIRONMENT=/app/backend/.venv \

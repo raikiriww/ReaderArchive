@@ -18,7 +18,8 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = 60 * 24 * 8
     database_url: str = "postgresql+psycopg://reader:reader@db:5432/reader"
     archive_dir: Path = Path("/app/data/archive")
-    browser_profile_dir: Path = Path("/app/data/browser/config/.config/singlefile-api")
+    browser_profile_dir: Path = Path("/config/.config/reader-archive-profile")
+    browser_remote_debugging_url: str | None = None
     single_file_path: str = "/usr/local/bin/single-file"
     yt_dlp_path: str = "/usr/local/bin/yt-dlp"
     chrome_path: str = "/usr/bin/google-chrome"
