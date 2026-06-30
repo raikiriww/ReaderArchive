@@ -114,6 +114,8 @@ The app container makes the archive and browser profile folders writable for the
 configured desktop user when it starts.
 
 Back up the whole `data/` folder if you want to preserve the archive.
+Browser login state is stored under
+`data/browser/config/.config/reader-archive-profile`.
 
 ## Browser Desktop
 
@@ -124,6 +126,9 @@ http://localhost:38165/browser/
 ```
 
 The browser desktop is available through Reader Archive and is protected by the app login. Raw desktop ports are not published by Docker.
+The visible browser desktop and the archiver share the same browser session.
+Sign in or pass browser checks from the desktop when a site needs it, then
+archive the page normally.
 
 ## Configuration
 

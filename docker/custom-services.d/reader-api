@@ -15,7 +15,7 @@ export VIRTUAL_ENV=/app/backend/.venv
 export PATH="/app/backend/.venv/bin:${PATH}"
 
 archive_dir="${READER_ARCHIVE_DIR:-/app/data/archive}"
-browser_profile_dir="${READER_BROWSER_PROFILE_DIR:-/app/data/browser/config/.config/singlefile-api}"
+browser_profile_dir="${READER_BROWSER_PROFILE_DIR:-/config/.config/reader-archive-profile}"
 mkdir -p "$archive_dir" "$browser_profile_dir"
 chown abc:abc "$archive_dir" "$browser_profile_dir"
 

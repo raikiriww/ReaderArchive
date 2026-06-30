@@ -69,5 +69,7 @@ COPY backend/migrations ./migrations
 COPY scripts /app/scripts
 COPY --from=frontend-build /frontend /app/frontend
 COPY docker/custom-services.d/reader-api /custom-services.d/reader-api
+COPY docker/wrapped-chrome /usr/bin/wrapped-chrome
 
 RUN chmod 0755 /custom-services.d/reader-api
+RUN chmod 0755 /usr/bin/wrapped-chrome

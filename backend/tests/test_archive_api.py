@@ -23,6 +23,11 @@ from app.semantic import SemanticDocumentPreparer
 CREATED_DATABASES: list[tuple[str, str]] = []
 
 
+@pytest.fixture(autouse=True)
+def isolate_browser_remote_debugging_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("READER_BROWSER_REMOTE_DEBUGGING_URL", raising=False)
+
+
 def make_database_url() -> str:
     base_url = make_url(
         os.environ.get("READER_TEST_DATABASE_URL")
@@ -1512,6 +1517,77 @@ def test_active_chrome_singleton_files_are_kept(
 
     assert (profile_dir / "SingletonLock").is_symlink()
     assert (profile_dir / "SingletonSocket").is_symlink()
+
+
+def test_singlefile_archive_uses_ephemeral_cache(
+    tmp_path: Path,
+    fake_yt_dlp: Path,
+) -> None:
+    from app.archiver import SingleFileArchiver
+
+    script = tmp_path / "single-file-capture"
+    script.write_text(
+        """#!/usr/bin/env python3
+import pathlib
+import sys
+
+output_path = pathlib.Path(sys.argv[2])
+output_path.write_text("<html><head><title>ok</title></head><body>ok</body></html>", encoding="utf-8")
+output_path.with_suffix(".args").write_text("\\n".join(sys.argv[3:]), encoding="utf-8")
+""",
+        encoding="utf-8",
+    )
+    script.chmod(0o755)
+    settings = Settings(
+        archive_dir=tmp_path / "archive",
+        browser_profile_dir=tmp_path / "profile",
+        single_file_path=str(script),
+        yt_dlp_path=str(fake_yt_dlp),
+        chrome_path="/bin/true",
+        use_xvfb=False,
+    )
+
+    asyncio.run(SingleFileArchiver(settings).archive("https://example.com/", "page.html"))
+
+    args = (settings.archive_dir / "page.args").read_text(encoding="utf-8").splitlines()
+    assert any(arg.startswith("--browser-arg=--disk-cache-dir=") for arg in args)
+    assert "--browser-arg=--disk-cache-size=1" in args
+    assert "--browser-arg=--media-cache-size=1" in args
+    assert "--browser-arg=--disable-cache" in args
+    assert "--browser-arg=--disable-application-cache" in args
+    assert "--http-header=Cache-Control=no-cache" in args
+    assert "--http-header=Pragma=no-cache" in args
+
+
+def test_singlefile_archive_can_use_running_chrome_debug_endpoint(
+    tmp_path: Path,
+    fake_yt_dlp: Path,
+) -> None:
+    from app.archiver import SingleFileArchiver
+
+    settings = Settings(
+        archive_dir=tmp_path / "archive",
+        browser_profile_dir=tmp_path / "profile",
+        single_file_path="/usr/local/bin/single-file",
+        yt_dlp_path=str(fake_yt_dlp),
+        chrome_path="/bin/true",
+        use_xvfb=False,
+        browser_remote_debugging_url="http://127.0.0.1:9222",
+    )
+    archiver = SingleFileArchiver(settings)
+
+    args = archiver._archive_command(
+        "https://example.com/",
+        settings.archive_dir / "page.html",
+        settings.browser_profile_dir,
+        None,
+    )
+
+    assert "--browser-server=http://127.0.0.1:9222" in args
+    assert "--http-header=Cache-Control=no-cache" in args
+    assert "--http-header=Pragma=no-cache" in args
+    assert not any(arg.startswith("--browser-arg=--user-data-dir=") for arg in args)
+    assert not any(arg.startswith("--browser-executable-path=") for arg in args)
 
 
 def test_short_error_prefers_actual_error_line() -> None:
