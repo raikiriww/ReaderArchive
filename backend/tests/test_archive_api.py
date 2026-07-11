@@ -14,6 +14,7 @@ from sqlalchemy import text
 from sqlalchemy.engine import make_url
 from sqlmodel import Session
 
+from app.archiver import BrowserLoginRequiredError, YtDlpDownloader
 from app.core.config import Settings
 from app.core.db import get_engine
 from app.main import create_app
@@ -168,7 +169,13 @@ if "--cookies-from-browser" not in sys.argv:
     print("missing --cookies-from-browser", file=sys.stderr)
     sys.exit(1)
 
-output = pathlib.Path(sys.argv[sys.argv.index("--output") + 1].replace("%(ext)s", "mp4"))
+template = sys.argv[sys.argv.index("--output") + 1]
+if "%(playlist_index&.{}|)s" not in template:
+    print("missing conditional playlist index", file=sys.stderr)
+    sys.exit(1)
+output = pathlib.Path(
+    template.replace("%(playlist_index&.{}|)s", "").replace("%(ext)s", "mp4")
+)
 output.write_bytes(b"fake video")
 output.with_suffix(".info.json").write_text("{}", encoding="utf-8")
 output.with_suffix(".description").write_text("fake description", encoding="utf-8")
@@ -178,6 +185,124 @@ output.with_suffix(".webp").write_bytes(b"fake thumbnail")
     )
     script.chmod(0o755)
     return script
+
+
+@pytest.fixture
+def fake_multi_video_yt_dlp(tmp_path: Path) -> Path:
+    script = tmp_path / "yt-dlp-multi-video"
+    script.write_text(
+        """#!/usr/bin/env python3
+import pathlib
+import sys
+
+template = sys.argv[sys.argv.index("--output") + 1]
+conditional_index = "%(playlist_index&.{}|)s"
+if conditional_index not in template:
+    print("missing conditional playlist index", file=sys.stderr)
+    sys.exit(1)
+
+for index in range(1, 5):
+    output = pathlib.Path(
+        template.replace(conditional_index, f".{index}").replace("%(ext)s", "mp4")
+    )
+    output.write_bytes(f"fake video {index}".encode())
+    output.with_suffix(".info.json").write_text(
+        f'{{"title": "Video {index}"}}',
+        encoding="utf-8",
+    )
+""",
+        encoding="utf-8",
+    )
+    script.chmod(0o755)
+    return script
+
+
+@pytest.fixture
+def fake_416_yt_dlp(tmp_path: Path) -> Path:
+    script = tmp_path / "yt-dlp-416"
+    script.write_text(
+        """#!/usr/bin/env python3
+import sys
+
+print(
+    "ERROR: unable to download video data: HTTP Error 416: Requested Range Not Satisfiable",
+    file=sys.stderr,
+)
+sys.exit(1)
+""",
+        encoding="utf-8",
+    )
+    script.chmod(0o755)
+    return script
+
+
+def test_single_video_keeps_original_file_name(
+    tmp_path: Path,
+    fake_yt_dlp: Path,
+) -> None:
+    settings = Settings(
+        archive_dir=tmp_path / "archive",
+        browser_profile_dir=tmp_path / "profile",
+        yt_dlp_path=str(fake_yt_dlp),
+        use_xvfb=False,
+    )
+
+    files = asyncio.run(YtDlpDownloader(settings).download("https://example.com/video", "task"))
+
+    assert "task.mp4" in files
+    assert not any(path.name.startswith("task.NA") for path in settings.archive_dir.iterdir())
+
+
+def test_multi_video_uses_distinct_playlist_index_file_names(
+    tmp_path: Path,
+    fake_multi_video_yt_dlp: Path,
+) -> None:
+    settings = Settings(
+        archive_dir=tmp_path / "archive",
+        browser_profile_dir=tmp_path / "profile",
+        yt_dlp_path=str(fake_multi_video_yt_dlp),
+        use_xvfb=False,
+    )
+
+    files = asyncio.run(
+        YtDlpDownloader(settings).download("https://weibo.com/1401527553/R81nWpSCx", "task")
+    )
+
+    assert [name for name in files if name.endswith(".mp4")] == [
+        "task.1.mp4",
+        "task.2.mp4",
+        "task.3.mp4",
+        "task.4.mp4",
+    ]
+
+
+def test_http_416_is_download_failure_not_browser_login(
+    tmp_path: Path,
+    fake_416_yt_dlp: Path,
+) -> None:
+    settings = Settings(
+        archive_dir=tmp_path / "archive",
+        browser_profile_dir=tmp_path / "profile",
+        yt_dlp_path=str(fake_416_yt_dlp),
+        use_xvfb=False,
+    )
+
+    with pytest.raises(RuntimeError, match="HTTP Error 416") as exc_info:
+        asyncio.run(YtDlpDownloader(settings).download("https://example.com/video", "task"))
+
+    assert not isinstance(exc_info.value, BrowserLoginRequiredError)
+
+
+def test_only_authentication_http_errors_require_browser_login() -> None:
+    downloader = YtDlpDownloader(Settings())
+
+    assert downloader._is_browser_login_error("HTTP Error 401: Unauthorized")
+    assert downloader._is_browser_login_error("HTTP Error 403: Forbidden")
+    assert downloader._is_browser_login_error(
+        "ERROR: [BiliBili] HTTP Error 412: Precondition Failed"
+    )
+    assert not downloader._is_browser_login_error("HTTP Error 412: Precondition Failed")
+    assert not downloader._is_browser_login_error("HTTP Error 416: Requested Range Not Satisfiable")
 
 
 @pytest.fixture
@@ -263,7 +388,10 @@ if "--cookies-from-browser" not in sys.argv:
     print("missing --cookies-from-browser", file=sys.stderr)
     sys.exit(1)
 
-output = pathlib.Path(sys.argv[sys.argv.index("--output") + 1].replace("%(ext)s", "mp4"))
+template = sys.argv[sys.argv.index("--output") + 1]
+output = pathlib.Path(
+    template.replace("%(playlist_index&.{}|)s", "").replace("%(ext)s", "mp4")
+)
 output.write_bytes(b"fake titled video")
 output.with_suffix(".info.json").write_text(
     '{"title": "Video title from yt-dlp"}',
@@ -313,7 +441,10 @@ if not marker.exists():
     )
     sys.exit(1)
 
-output = pathlib.Path(sys.argv[sys.argv.index("--output") + 1].replace("%(ext)s", "mp4"))
+template = sys.argv[sys.argv.index("--output") + 1]
+output = pathlib.Path(
+    template.replace("%(playlist_index&.{}|)s", "").replace("%(ext)s", "mp4")
+)
 output.write_bytes(b"fake video after login")
 output.with_suffix(".info.json").write_text("{}", encoding="utf-8")
 """,

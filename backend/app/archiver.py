@@ -297,7 +297,7 @@ class YtDlpDownloader:
     async def download(self, url: str, output_stem: str) -> list[str]:
         archive_dir = self.settings.archive_dir
         archive_dir.mkdir(parents=True, exist_ok=True)
-        output_template = archive_dir / f"{output_stem}.%(ext)s"
+        output_template = archive_dir / f"{output_stem}%(playlist_index&.{{}}|)s.%(ext)s"
         existing_files = set(archive_dir.glob(f"{output_stem}.*"))
 
         command = [
@@ -353,7 +353,7 @@ class YtDlpDownloader:
                 if text
             )
             msg = output[-1000:] if output else "yt-dlp failed."
-            if self._is_http_4xx_error(msg):
+            if self._is_browser_login_error(msg):
                 raise BrowserLoginRequiredError(self._browser_login_message(msg))
             raise RuntimeError(msg)
 
@@ -390,12 +390,24 @@ class YtDlpDownloader:
     def _is_user_uploaded_file(self, output_stem: str, path: Path) -> bool:
         return path.name.startswith(f"{output_stem}.upload-")
 
-    def _is_http_4xx_error(self, output: str) -> bool:
-        return any(
-            f"HTTP Error {code}" in output
-            or f"HTTPError {code}" in output
-            or f"status code {code}" in output.lower()
-            for code in range(400, 500)
+    def _is_browser_login_error(self, output: str) -> bool:
+        lowered = output.lower()
+        authentication_statuses = (401, 403)
+        if any(
+            f"http error {code}" in lowered
+            or f"httperror {code}" in lowered
+            or f"status code {code}" in lowered
+            for code in authentication_statuses
+        ):
+            return True
+
+        return "[bilibili]" in lowered and any(
+            marker in lowered
+            for marker in (
+                "http error 412",
+                "httperror 412",
+                "status code 412",
+            )
         )
 
     def _browser_login_message(self, output: str) -> str:
