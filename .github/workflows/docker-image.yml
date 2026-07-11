@@ -5,8 +5,6 @@ on:
     branches:
       - main
   push:
-    branches:
-      - main
     tags:
       - "v*"
   workflow_dispatch:
@@ -43,7 +41,7 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
-            type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
             type=ref,event=tag
             type=semver,pattern={{version}}
             type=sha,prefix=sha-
@@ -76,7 +74,7 @@ jobs:
         run: docker compose -f compose.yaml -f compose.build.yaml down -v
 
       - name: Log in to GHCR
-        if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
+        if: startsWith(github.ref, 'refs/tags/v')
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
@@ -84,7 +82,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Tag and push verified image
-        if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
+        if: startsWith(github.ref, 'refs/tags/v')
         env:
           PUBLISH_TAGS: ${{ steps.meta.outputs.tags }}
         run: |
@@ -97,20 +95,13 @@ jobs:
           EOF
 
       - name: Check anonymous image access
-        if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
+        if: startsWith(github.ref, 'refs/tags/v')
         env:
-          GITHUB_REF_TYPE: ${{ github.ref_type }}
           GITHUB_REF_NAME: ${{ github.ref_name }}
         run: |
-          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
-            check_tag="$GITHUB_REF_NAME"
-          else
-            check_tag="latest"
-          fi
-
           docker logout "$REGISTRY"
 
-          if ! docker manifest inspect "$REGISTRY/$IMAGE_NAME:$check_tag" >/dev/null; then
-            echo "::error::Published image $REGISTRY/$IMAGE_NAME:$check_tag is not anonymously accessible. Open the GitHub package settings for readerarchive and change visibility to Public, then rerun this workflow."
+          if ! docker manifest inspect "$REGISTRY/$IMAGE_NAME:$GITHUB_REF_NAME" >/dev/null; then
+            echo "::error::Published image $REGISTRY/$IMAGE_NAME:$GITHUB_REF_NAME is not anonymously accessible. Open the GitHub package settings for readerarchive and change visibility to Public, then rerun this workflow."
             exit 1
           fi

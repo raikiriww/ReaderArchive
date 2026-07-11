@@ -197,8 +197,10 @@ ghcr.io/raikiriww/readerarchive
 ## Releases
 
 Docker images are published by GitHub Actions after the Docker verification
-passes. Version tags such as `v0.1.0` publish both `v0.1.0` and `0.1.0` image
-tags. The `main` branch publishes `latest`.
+passes. Pull requests run the full verification without publishing an image.
+Merging to `main` does not publish an image. Version tags such as `v0.1.0`
+build and verify the image once, then publish that same image as `latest`,
+`v0.1.0`, `0.1.0`, and a commit-specific `sha-*` tag.
 
 After the first successful release, open the `readerarchive` package in GitHub
 Packages and change its visibility to public. The release workflow checks
