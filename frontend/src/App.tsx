@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   changePassword as changePasswordRequest,
-  continueArchiveVideo,
   createArchiveTask,
   createRssFeed,
   createUser as createUserRequest,
@@ -23,6 +22,7 @@ import {
   rearchiveTask as rearchiveTaskRequest,
   refreshRssFeed,
   resetUserPassword as resetUserPasswordRequest,
+  resumeManualAction as resumeManualActionRequest,
   updateAppConfig,
   updateArchiveTask,
   updateArchiveTaskFile,
@@ -330,22 +330,23 @@ export function MainApp(): JSX.Element {
     }
   }
 
-  async function continueVideo(taskId: string): Promise<void> {
+  async function resumeManualAction(taskId: string, code: string): Promise<void> {
     try {
-      await continueArchiveVideo(taskId);
-      showToast("已继续下载视频");
+      await resumeManualActionRequest(taskId, code);
+      showToast("已继续处理");
       await invalidateArchiveData();
     } catch (error) {
-      showToast(error instanceof Error ? error.message : "继续下载失败");
+      showToast(error instanceof Error ? error.message : "继续处理失败");
     }
   }
 
-  async function openTaskInBrowser(taskId: string): Promise<void> {
+  async function openTaskInBrowser(taskId: string, actionCode: string): Promise<void> {
     const browserTab = window.open("about:blank", "_blank");
     try {
-      const result = await openArchiveTaskInBrowser(taskId);
+      const result = await openArchiveTaskInBrowser(taskId, actionCode);
       if (browserTab && result.desktop_url) browserTab.location.href = result.desktop_url;
       showToast("已在浏览器打开对应网页");
+      await invalidateArchiveData();
     } catch (error) {
       if (browserTab) browserTab.close();
       showToast(error instanceof Error ? error.message : "打开浏览器失败");
@@ -602,8 +603,8 @@ export function MainApp(): JSX.Element {
             onRefreshFiles={() => void refreshFiles(true)}
             onUploadFile={(file) => void uploadFile(file)}
             onDeleteTask={(taskId) => void deleteTask(taskId)}
-            onContinueVideo={(taskId) => void continueVideo(taskId)}
-            onOpenBrowser={(taskId) => void openTaskInBrowser(taskId)}
+            onResumeManualAction={(taskId, code) => void resumeManualAction(taskId, code)}
+            onOpenBrowser={(taskId, actionCode) => void openTaskInBrowser(taskId, actionCode)}
             onMarkRead={(taskId) => void markRead(taskId)}
             onRearchiveTask={(taskId) => void rearchiveTask(taskId)}
             onRenameTask={renameTask}

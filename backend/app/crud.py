@@ -19,6 +19,7 @@ from app.models import (
     AppConfigRead,
     AppConfigUpdate,
     AppSetting,
+    ArchiveBrowserTabBinding,
     ArchiveFile,
     ArchiveSemanticChunk,
     ArchiveSemanticIndex,
@@ -30,7 +31,10 @@ from app.models import (
     ArchiveTaskSourceType,
     ArchiveTaskStatus,
     ArchiveTaskTag,
+    BrowserTabState,
     LoginToken,
+    ManualActionRead,
+    ManualActionTarget,
     RssEntry,
     RssFeedRead,
     RssSource,
@@ -458,8 +462,7 @@ class ArchiveTaskRepository:
             if cleaned_query:
                 selected.sort(
                     key=lambda item: (
-                        (item[0].search_match.score if item[0].search_match else 0.0)
-                        + item[1],
+                        (item[0].search_match.score if item[0].search_match else 0.0) + item[1],
                         item[0].created_at,
                     ),
                     reverse=True,
@@ -683,7 +686,7 @@ class ArchiveTaskRepository:
                 .where(
                     ArchiveSemanticIndex.model_name == model_name,
                     ArchiveSemanticIndex.text_version == text_version,
-                    ArchiveSemanticIndex.last_error.is_not(None),
+                    col(ArchiveSemanticIndex.last_error).is_not(None),
                 )
                 .order_by(col(ArchiveSemanticIndex.updated_at).desc())
                 .limit(1)
@@ -743,11 +746,14 @@ class ArchiveTaskRepository:
         if not cleaned_query:
             return {}
         exact_pattern = f"%{self._escape_like(cleaned_query)}%"
-        term_patterns = [f"%{self._escape_like(term)}%" for term in self._search_terms(cleaned_query)]
+        term_patterns = [
+            f"%{self._escape_like(term)}%" for term in self._search_terms(cleaned_query)
+        ]
         with self._session() as session:
-            rows = session.execute(
-                text(
-                    r"""
+            rows = list(
+                session.execute(
+                    text(
+                        r"""
                     SELECT task_id, content
                     FROM reader_archive_semantic_chunks
                     WHERE model_name = :model_name
@@ -755,13 +761,14 @@ class ArchiveTaskRepository:
                     ORDER BY updated_at DESC
                     LIMIT :limit
                     """
-                ),
-                {
-                    "model_name": model_name,
-                    "pattern": exact_pattern,
-                    "limit": limit,
-                },
-            ).all()
+                    ),
+                    {
+                        "model_name": model_name,
+                        "pattern": exact_pattern,
+                        "limit": limit,
+                    },
+                ).all()
+            )
             if term_patterns:
                 for pattern in term_patterns:
                     rows.extend(
@@ -801,7 +808,9 @@ class ArchiveTaskRepository:
 
     def list_tags(self) -> list[dict[str, str | int]]:
         with self._session() as session:
-            tags = sorted(session.exec(select(ArchiveTag)).all(), key=lambda item: item.name.casefold())
+            tags = sorted(
+                session.exec(select(ArchiveTag)).all(), key=lambda item: item.name.casefold()
+            )
             result: list[dict[str, str | int]] = []
             for tag in tags:
                 count = session.exec(
@@ -836,9 +845,16 @@ class ArchiveTaskRepository:
             task = session.get(ArchiveTask, task_id)
             if task is None:
                 return False
-            session.exec(delete(ArchiveSemanticChunk).where(ArchiveSemanticChunk.task_id == task_id))
-            session.exec(delete(ArchiveSemanticIndex).where(ArchiveSemanticIndex.task_id == task_id))
+            session.exec(
+                delete(ArchiveSemanticChunk).where(ArchiveSemanticChunk.task_id == task_id)
+            )
+            session.exec(
+                delete(ArchiveSemanticIndex).where(ArchiveSemanticIndex.task_id == task_id)
+            )
             session.exec(delete(ArchiveFile).where(ArchiveFile.task_id == task_id))
+            session.exec(
+                delete(ArchiveBrowserTabBinding).where(ArchiveBrowserTabBinding.task_id == task_id)
+            )
             session.exec(delete(ArchiveTaskTag).where(ArchiveTaskTag.task_id == task_id))
             session.exec(delete(RssEntry).where(RssEntry.archive_task_id == task_id))
             session.delete(task)
@@ -968,9 +984,16 @@ class ArchiveTaskRepository:
             task = session.get(ArchiveTask, task_id)
             if task is None:
                 return False
-            session.exec(delete(ArchiveSemanticChunk).where(ArchiveSemanticChunk.task_id == task_id))
-            session.exec(delete(ArchiveSemanticIndex).where(ArchiveSemanticIndex.task_id == task_id))
+            session.exec(
+                delete(ArchiveSemanticChunk).where(ArchiveSemanticChunk.task_id == task_id)
+            )
+            session.exec(
+                delete(ArchiveSemanticIndex).where(ArchiveSemanticIndex.task_id == task_id)
+            )
             session.exec(delete(ArchiveFile).where(ArchiveFile.task_id == task_id))
+            session.exec(
+                delete(ArchiveBrowserTabBinding).where(ArchiveBrowserTabBinding.task_id == task_id)
+            )
             task.status = ArchiveTaskStatus.QUEUED
             task.output_file = f"{task_id}.html"
             task.video_file = None
@@ -980,6 +1003,7 @@ class ArchiveTaskRepository:
             task.started_at = None
             task.finished_at = None
             task.current_step = "queued"
+            task.manual_actions = []
             task.updated_at = utc_now()
             session.add(task)
             session.commit()
@@ -1003,24 +1027,172 @@ class ArchiveTaskRepository:
             video_title=video_title,
             video_error=video_error,
             page_error=page_error,
+            manual_actions=[],
         )
 
-    def mark_browser_login_required(
+    def mark_manual_action_required(
         self,
         task_id: str,
-        video_error: str,
+        manual_actions: list[ManualActionRead],
+        video_file: str | None = None,
+        video_title: str | None = None,
+        video_error: str | None = None,
         page_error: str | None = None,
     ) -> None:
         self._update_task(
             task_id,
-            status=ArchiveTaskStatus.BROWSER_LOGIN_REQUIRED,
+            status=ArchiveTaskStatus.MANUAL_ACTION_REQUIRED,
             error=None,
-            current_step="browser_login",
+            current_step="manual_action",
             finished_at=None,
-            video_file=None,
+            manual_actions=[
+                action.model_dump(mode="json", exclude={"browser_tab_state"})
+                for action in manual_actions
+            ],
+            video_file=video_file,
+            video_title=video_title,
             video_error=video_error,
             page_error=page_error,
         )
+
+    def update_manual_actions(
+        self,
+        task_id: str,
+        manual_actions: list[ManualActionRead],
+    ) -> None:
+        self._update_task(
+            task_id,
+            manual_actions=[
+                action.model_dump(mode="json", exclude={"browser_tab_state"})
+                for action in manual_actions
+            ],
+        )
+
+    def get_browser_tab_binding(
+        self,
+        task_id: str,
+        target: ManualActionTarget | str,
+    ) -> ArchiveBrowserTabBinding | None:
+        target_value = str(target)
+        with self._session() as session:
+            return session.exec(
+                select(ArchiveBrowserTabBinding).where(
+                    ArchiveBrowserTabBinding.task_id == task_id,
+                    ArchiveBrowserTabBinding.target == target_value,
+                )
+            ).first()
+
+    def list_browser_tab_bindings(self, task_id: str) -> list[ArchiveBrowserTabBinding]:
+        with self._session() as session:
+            return list(
+                session.exec(
+                    select(ArchiveBrowserTabBinding).where(
+                        ArchiveBrowserTabBinding.task_id == task_id
+                    )
+                ).all()
+            )
+
+    def list_all_browser_tab_bindings(self) -> list[ArchiveBrowserTabBinding]:
+        with self._session() as session:
+            return list(session.exec(select(ArchiveBrowserTabBinding)).all())
+
+    def claimed_browser_target_ids(self, except_task_id: str | None = None) -> set[str]:
+        with self._session() as session:
+            statement = select(ArchiveBrowserTabBinding).where(
+                ArchiveBrowserTabBinding.state == BrowserTabState.AVAILABLE,
+                col(ArchiveBrowserTabBinding.browser_target_id).is_not(None),
+            )
+            if except_task_id:
+                statement = statement.where(ArchiveBrowserTabBinding.task_id != except_task_id)
+            bindings = session.exec(statement).all()
+            return {binding.browser_target_id for binding in bindings if binding.browser_target_id}
+
+    def upsert_browser_tab_binding(
+        self,
+        task_id: str,
+        target: ManualActionTarget | str,
+        original_url: str,
+        browser_target_id: str | None,
+        *,
+        last_url: str | None = None,
+        owned_by_reader: bool = True,
+        state: BrowserTabState = BrowserTabState.AVAILABLE,
+    ) -> ArchiveBrowserTabBinding:
+        target_value = str(target)
+        now = utc_now()
+        with self._session() as session:
+            binding = session.exec(
+                select(ArchiveBrowserTabBinding).where(
+                    ArchiveBrowserTabBinding.task_id == task_id,
+                    ArchiveBrowserTabBinding.target == target_value,
+                )
+            ).first()
+            if binding is None:
+                binding = ArchiveBrowserTabBinding(
+                    task_id=task_id,
+                    target=target_value,
+                    browser_target_id=browser_target_id,
+                    original_url=original_url,
+                    last_url=last_url,
+                    owned_by_reader=owned_by_reader,
+                    state=str(state),
+                    created_at=now,
+                    updated_at=now,
+                )
+            else:
+                binding.browser_target_id = browser_target_id
+                binding.original_url = original_url
+                binding.last_url = last_url
+                binding.owned_by_reader = owned_by_reader
+                binding.state = str(state)
+                binding.updated_at = now
+            session.add(binding)
+            session.commit()
+            session.refresh(binding)
+            return binding
+
+    def mark_browser_tab_missing(
+        self,
+        task_id: str,
+        target: ManualActionTarget | str,
+    ) -> bool:
+        target_value = str(target)
+        with self._session() as session:
+            binding = session.exec(
+                select(ArchiveBrowserTabBinding).where(
+                    ArchiveBrowserTabBinding.task_id == task_id,
+                    ArchiveBrowserTabBinding.target == target_value,
+                )
+            ).first()
+            if binding is None:
+                return False
+            binding.browser_target_id = None
+            binding.state = BrowserTabState.MISSING
+            binding.updated_at = utc_now()
+            session.add(binding)
+            session.commit()
+            return True
+
+    def delete_browser_tab_binding(
+        self,
+        task_id: str,
+        target: ManualActionTarget | str,
+    ) -> None:
+        with self._session() as session:
+            session.exec(
+                delete(ArchiveBrowserTabBinding).where(
+                    ArchiveBrowserTabBinding.task_id == task_id,
+                    ArchiveBrowserTabBinding.target == str(target),
+                )
+            )
+            session.commit()
+
+    def delete_browser_tab_bindings(self, task_id: str) -> None:
+        with self._session() as session:
+            session.exec(
+                delete(ArchiveBrowserTabBinding).where(ArchiveBrowserTabBinding.task_id == task_id)
+            )
+            session.commit()
 
     def mark_failed(self, task_id: str, error: str) -> None:
         self._update_task(
@@ -1029,6 +1201,7 @@ class ArchiveTaskRepository:
             finished_at=utc_now(),
             error=error,
             current_step=None,
+            manual_actions=[],
         )
 
     def create_rss_feed(self, feed_id: str, url: str, title: str) -> RssFeedRead:
@@ -1065,7 +1238,9 @@ class ArchiveTaskRepository:
                 .where(RssSource.is_enabled == True)  # noqa: E712
                 .order_by(col(RssSource.last_checked_at), col(RssSource.created_at))
             ).all()
-            return [self._to_rss_feed(feed) for feed in feeds if self._rss_feed_is_due(feed, cutoff)]
+            return [
+                self._to_rss_feed(feed) for feed in feeds if self._rss_feed_is_due(feed, cutoff)
+            ]
 
     def get_rss_feed(self, feed_id: str) -> RssFeedRead | None:
         with self._session() as session:
@@ -1174,27 +1349,41 @@ class ArchiveTaskRepository:
     def _to_task(self, session: Session, task: ArchiveTask) -> ArchiveTaskRead:
         result = None
         if task.status in {
+            ArchiveTaskStatus.RUNNING,
             ArchiveTaskStatus.SUCCEEDED,
-            ArchiveTaskStatus.BROWSER_LOGIN_REQUIRED,
+            ArchiveTaskStatus.MANUAL_ACTION_REQUIRED,
         }:
             file_name = None if task.page_error else task.output_file
             result = ArchiveTaskResult(
                 file_name=file_name,
-                download_url=(
-                    f"/api/v1/archive-tasks/{task.id}/result"
-                    if file_name
-                    else None
-                ),
+                download_url=(f"/api/v1/archive-tasks/{task.id}/result" if file_name else None),
                 view_url=f"/api/v1/archive-tasks/{task.id}/files",
                 video_file_name=task.video_file,
                 video_download_url=(
-                    f"/api/v1/archive-tasks/{task.id}/result/video"
-                    if task.video_file
-                    else None
+                    f"/api/v1/archive-tasks/{task.id}/result/video" if task.video_file else None
                 ),
                 video_error=task.video_error,
                 page_error=task.page_error,
             )
+        manual_actions: list[ManualActionRead] = []
+        bindings = {
+            binding.target: binding
+            for binding in session.exec(
+                select(ArchiveBrowserTabBinding).where(ArchiveBrowserTabBinding.task_id == task.id)
+            ).all()
+        }
+        for value in task.manual_actions or []:
+            try:
+                action = ManualActionRead.model_validate(value)
+                binding = bindings.get(str(action.target))
+                tab_state = (
+                    BrowserTabState(binding.state)
+                    if binding is not None
+                    else BrowserTabState.NOT_OPENED
+                )
+                manual_actions.append(action.model_copy(update={"browser_tab_state": tab_state}))
+            except (TypeError, ValueError):
+                continue
         display_title = (
             str(task.custom_title or "").strip()
             or str(task.entry_title or "").strip()
@@ -1210,6 +1399,7 @@ class ArchiveTaskRepository:
             started_at=_clean_datetime(task.started_at),
             finished_at=_clean_datetime(task.finished_at),
             current_step=task.current_step,
+            manual_actions=manual_actions,
             source_type=ArchiveTaskSourceType(task.source_type),
             source_feed_id=task.source_feed_id,
             source_title=task.source_title,

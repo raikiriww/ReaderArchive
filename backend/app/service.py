@@ -5,6 +5,8 @@ import json
 import logging
 import re
 from collections.abc import AsyncIterator
+from contextlib import suppress
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from html.parser import HTMLParser
 from pathlib import Path
@@ -13,6 +15,7 @@ from uuid import uuid4
 from app.archiver import (
     BrowserLoginRequiredError,
     BrowserOpener,
+    BrowserTab,
     SingleFileArchiver,
     YtDlpDownloader,
 )
@@ -23,6 +26,10 @@ from app.models import (
     ArchiveTaskRead,
     ArchiveTaskSourceType,
     ArchiveTaskStatus,
+    ManualActionKind,
+    ManualActionRead,
+    ManualActionResume,
+    ManualActionTarget,
     RssFeedRead,
     RssFeedRefreshResult,
     SemanticHealthRead,
@@ -38,8 +45,15 @@ from app.semantic import (
     SemanticDocumentPreparer,
     semantic_texts_for_embedding,
 )
+from app.site_rules import ArchiveSiteRuleRegistry, default_site_rule_registry
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class PageArchiveOutcome:
+    error: str | None = None
+    manual_actions: tuple[ManualActionRead, ...] = ()
 
 
 class ArchiveTaskService:
@@ -51,6 +65,7 @@ class ArchiveTaskService:
         browser_opener: BrowserOpener,
         embedding_provider: LocalEmbeddingProvider | None = None,
         semantic_preparer: SemanticDocumentPreparer | None = None,
+        site_rule_registry: ArchiveSiteRuleRegistry | None = None,
     ) -> None:
         self.repository = repository
         self.archiver = archiver
@@ -58,6 +73,7 @@ class ArchiveTaskService:
         self.browser_opener = browser_opener
         self.embedding_provider = embedding_provider
         self.semantic_preparer = semantic_preparer
+        self.site_rule_registry = site_rule_registry or default_site_rule_registry()
         self.queue: asyncio.Queue[str] = asyncio.Queue()
         self.semantic_queue: asyncio.Queue[str] = asyncio.Queue()
         self.worker: asyncio.Task[None] | None = None
@@ -70,6 +86,7 @@ class ArchiveTaskService:
     async def start(self) -> None:
         self.repository.initialize()
         self.repository.mark_stale_running_tasks_failed()
+        await self._reconcile_browser_tab_bindings()
         for task_id in self.repository.list_queued():
             await self.queue.put(task_id)
         self.worker = asyncio.create_task(self._run_worker())
@@ -186,10 +203,10 @@ class ArchiveTaskService:
         if task.status in {
             ArchiveTaskStatus.QUEUED,
             ArchiveTaskStatus.RUNNING,
-            ArchiveTaskStatus.BROWSER_LOGIN_REQUIRED,
         }:
             msg = "Archive task is still running."
             raise RuntimeError(msg)
+        await self._release_all_browser_tabs(task_id)
         files = list(self.archiver.settings.archive_dir.glob(f"{task_id}.*"))
         for path in files:
             if path.is_file():
@@ -204,13 +221,14 @@ class ArchiveTaskService:
             raise ValueError(msg)
         return self._with_existing_result_files(updated)
 
-    def delete_task(self, task_id: str) -> bool:
+    async def delete_task(self, task_id: str) -> bool:
         task = self.repository.get(task_id)
         if task is None:
             return False
         if task.status == ArchiveTaskStatus.RUNNING:
             msg = "Archive task is still running."
             raise ValueError(msg)
+        await self._release_all_browser_tabs(task_id)
         files = list(self.archiver.settings.archive_dir.glob(f"{task_id}.*"))
         deleted = self.repository.delete_archive_task(task_id)
         if not deleted:
@@ -220,30 +238,127 @@ class ArchiveTaskService:
                 path.unlink(missing_ok=True)
         return True
 
-    async def continue_after_browser_login(self, task_id: str) -> ArchiveTaskRead:
+    async def resume_manual_action(
+        self,
+        task_id: str,
+        action_code: str,
+    ) -> ArchiveTaskRead:
         task = self.repository.get(task_id)
         if task is None:
             msg = "Archive task not found."
             raise ValueError(msg)
-        if task.status != ArchiveTaskStatus.BROWSER_LOGIN_REQUIRED:
-            msg = "Archive task is not waiting for browser login."
+        if task.status != ArchiveTaskStatus.MANUAL_ACTION_REQUIRED:
+            msg = "Archive task is not waiting for manual action."
             raise ValueError(msg)
-        self.repository.mark_running(task_id, current_step="video")
-        worker = asyncio.create_task(self._retry_video_after_browser_login(task_id))
+        action = next(
+            (item for item in task.manual_actions if item.code == action_code),
+            None,
+        )
+        if action is None:
+            msg = "Manual action not found."
+            raise ValueError(msg)
+        if self.archiver.settings.browser_remote_debugging_url:
+            tab = await self._resolve_browser_tab(task, action.target)
+            if tab is None:
+                self.repository.mark_browser_tab_missing(task_id, action.target)
+                msg = "原来的浏览器页面已经关闭，请先点击“重新打开浏览器”。"
+                raise ValueError(msg)
+        remaining_actions = [
+            action
+            for action in task.manual_actions
+            if action.code != action_code
+        ]
+        page_error = task.result.page_error if task.result else None
+        self.repository.update_manual_actions(task_id, remaining_actions)
+        if action.resume == ManualActionResume.CONTINUE_VIDEO:
+            self.repository.mark_running(task_id, current_step="video")
+            worker = asyncio.create_task(
+                self._retry_video_after_browser_login(
+                    task_id,
+                    task.url,
+                    remaining_actions,
+                    page_error,
+                )
+            )
+        elif action.resume == ManualActionResume.RETRY_PAGE:
+            self.repository.mark_running(task_id, current_step="page")
+            worker = asyncio.create_task(
+                self._retry_page_after_manual_action(
+                    task,
+                    action,
+                    remaining_actions,
+                )
+            )
+        else:
+            msg = "Manual action cannot be resumed."
+            raise ValueError(msg)
         self.video_retry_workers.add(worker)
         worker.add_done_callback(self.video_retry_workers.discard)
         updated = self.repository.get(task_id)
         if updated is None:
             msg = "Archive task not found."
             raise ValueError(msg)
-        return updated
+        return self._with_existing_result_files(updated)
 
-    async def open_task_in_browser(self, task_id: str) -> None:
+    async def continue_after_browser_login(self, task_id: str) -> ArchiveTaskRead:
         task = self.repository.get(task_id)
         if task is None:
             msg = "Archive task not found."
             raise ValueError(msg)
-        await self.browser_opener.open(task.url)
+        action = next(
+            (
+                item
+                for item in task.manual_actions
+                if item.resume == ManualActionResume.CONTINUE_VIDEO
+            ),
+            None,
+        )
+        if action is None:
+            msg = "Archive task is not waiting for video login."
+            raise ValueError(msg)
+        return await self.resume_manual_action(task_id, action.code)
+
+    async def open_task_in_browser(
+        self,
+        task_id: str,
+        action_code: str | None = None,
+    ) -> None:
+        task = self.repository.get(task_id)
+        if task is None:
+            msg = "Archive task not found."
+            raise ValueError(msg)
+        if not task.manual_actions:
+            await self.browser_opener.open(task.url)
+            return
+        if action_code is None:
+            if len(task.manual_actions) != 1:
+                msg = "这个任务有多个待处理事项，请选择具体操作。"
+                raise ValueError(msg)
+            action = task.manual_actions[0]
+        else:
+            action = next(
+                (item for item in task.manual_actions if item.code == action_code),
+                None,
+            )
+            if action is None:
+                msg = "Manual action not found."
+                raise ValueError(msg)
+        tab = await self._resolve_browser_tab(task, action.target)
+        if tab is not None:
+            await self.browser_opener.activate(tab.target_id)
+            return
+        tab = await self.browser_opener.open(task.url)
+        if tab is None:
+            msg = "当前浏览器无法记录标签页，请使用完整服务中的内置浏览器。"
+            raise RuntimeError(msg)
+        self.repository.upsert_browser_tab_binding(
+            task.task_id,
+            action.target,
+            task.url,
+            tab.target_id,
+            last_url=tab.url,
+            owned_by_reader=True,
+        )
 
     def get_result_path(self, task: ArchiveTaskRead) -> Path:
         if task.result is None or task.result.file_name is None:
@@ -468,15 +583,22 @@ class ArchiveTaskService:
                     self._archive_page(task, f"{task_id}.html"),
                 )
                 video_job = asyncio.create_task(self._download_video(task.url, task_id))
-                page_error, video_result = await asyncio.gather(page_job, video_job)
+                page_outcome, video_result = await asyncio.gather(page_job, video_job)
                 video_file, video_title, video_error, needs_browser_login = video_result
+                manual_actions = list(page_outcome.manual_actions)
                 if needs_browser_login:
-                    self.repository.mark_browser_login_required(
+                    manual_actions.append(self._video_login_action(video_error))
+                if manual_actions:
+                    self.repository.mark_manual_action_required(
                         task_id,
-                        video_error=video_error or "浏览器登录需手动确认",
-                        page_error=page_error,
+                        manual_actions,
+                        video_file=video_file,
+                        video_title=video_title,
+                        video_error=None if needs_browser_login else video_error,
+                        page_error=page_outcome.error,
                     )
                     continue
+                page_error = page_outcome.error
                 if page_error and video_file is None:
                     if video_error:
                         raise RuntimeError(
@@ -529,18 +651,137 @@ class ArchiveTaskService:
         for feed in self.repository.list_enabled_rss_feeds_due(cutoff.isoformat()):
             await self.refresh_rss_feed(feed.feed_id)
 
-    async def _archive_page(self, task: ArchiveTaskRead, output_file: str) -> str | None:
+    async def _archive_page(
+        self,
+        task: ArchiveTaskRead,
+        output_file: str,
+        *,
+        reuse_existing_tab: bool = False,
+        manual_action: ManualActionRead | None = None,
+    ) -> PageArchiveOutcome:
+        output_path = self.archiver.settings.archive_dir / output_file
+        browser_target_id: str | None = None
+        keep_browser_tab = False
         try:
-            await self.archiver.archive(task.url, output_file)
+            if self.archiver.settings.browser_remote_debugging_url:
+                if reuse_existing_tab:
+                    tab = await self._resolve_browser_tab(
+                        task,
+                        ManualActionTarget.PAGE,
+                    )
+                    if tab is None:
+                        self.repository.mark_browser_tab_missing(
+                            task.task_id,
+                            ManualActionTarget.PAGE,
+                        )
+                        if manual_action is not None:
+                            keep_browser_tab = True
+                            return PageArchiveOutcome(
+                                manual_actions=(
+                                    manual_action.model_copy(
+                                        update={
+                                            "message": (
+                                                "原来的浏览器页面已经关闭，请重新打开后再保存。"
+                                            )
+                                        }
+                                    ),
+                                )
+                            )
+                        msg = "The browser tab is no longer open."
+                        raise RuntimeError(msg)
+                else:
+                    tab = await self.browser_opener.open("about:blank")
+                    if tab is None:
+                        msg = "Chrome did not return the archive tab."
+                        raise RuntimeError(msg)
+                    self.repository.upsert_browser_tab_binding(
+                        task.task_id,
+                        ManualActionTarget.PAGE,
+                        task.url,
+                        tab.target_id,
+                        last_url=tab.url,
+                        owned_by_reader=True,
+                    )
+                browser_target_id = tab.target_id
+            await self.archiver.archive(
+                task.url,
+                output_file,
+                browser_target_id=browser_target_id,
+                skip_navigation=reuse_existing_tab,
+            )
+            current_tab = (
+                await self.browser_opener.get(browser_target_id)
+                if browser_target_id
+                else None
+            )
+            if browser_target_id and current_tab is None:
+                self.repository.mark_browser_tab_missing(
+                    task.task_id,
+                    ManualActionTarget.PAGE,
+                )
+                if manual_action is not None:
+                    keep_browser_tab = True
+                    output_path.unlink(missing_ok=True)
+                    return PageArchiveOutcome(
+                        manual_actions=(
+                            manual_action.model_copy(
+                                update={
+                                    "message": (
+                                        "保存时原页面被关闭了，请重新打开后再保存。"
+                                    )
+                                }
+                            ),
+                        )
+                    )
+                msg = "The browser tab was closed while it was being saved."
+                raise RuntimeError(msg)
+            if current_tab is not None:
+                binding = self.repository.get_browser_tab_binding(
+                    task.task_id,
+                    ManualActionTarget.PAGE,
+                )
+                self.repository.upsert_browser_tab_binding(
+                    task.task_id,
+                    ManualActionTarget.PAGE,
+                    task.url,
+                    current_tab.target_id,
+                    last_url=current_tab.url,
+                    owned_by_reader=(binding.owned_by_reader if binding else True),
+                )
+            inspection = await asyncio.to_thread(
+                self.site_rule_registry.inspect,
+                task.url,
+                output_path,
+            )
+            if inspection is not None:
+                if inspection.manual_actions or inspection.error:
+                    output_path.unlink(missing_ok=True)
+                if inspection.manual_actions:
+                    keep_browser_tab = True
+                    return PageArchiveOutcome(manual_actions=inspection.manual_actions)
+                if inspection.error:
+                    return PageArchiveOutcome(error=inspection.error)
+            await asyncio.to_thread(
+                self.site_rule_registry.prepare_archive,
+                task.url,
+                output_path,
+            )
             archived_title = await asyncio.to_thread(
                 self._title_from_archive,
-                self.archiver.settings.archive_dir / output_file,
+                output_path,
             )
             if self._should_update_entry_title(task, archived_title):
                 self.repository.update_entry_title(task.task_id, archived_title)
         except Exception as exc:
-            return self._short_error(str(exc))
-        return None
+            output_path.unlink(missing_ok=True)
+            return PageArchiveOutcome(error=self._short_error(str(exc)))
+        finally:
+            if browser_target_id and not keep_browser_tab:
+                await self._release_browser_tab(
+                    task.task_id,
+                    ManualActionTarget.PAGE,
+                )
+        return PageArchiveOutcome()
 
     async def _enqueue_semantic_backfill(self) -> None:
         if not self._semantic_enabled():
@@ -746,20 +987,29 @@ class ArchiveTaskService:
             msg = f"Embedding dimensions mismatch: expected {expected}, got {actual}."
             raise ValueError(msg)
 
-    async def _retry_video_after_browser_login(self, task_id: str) -> None:
-        task = self.repository.get(task_id)
-        if task is None:
-            return
-        page_error = task.result.page_error if task.result else None
+    async def _retry_video_after_browser_login(
+        self,
+        task_id: str,
+        url: str,
+        remaining_actions: list[ManualActionRead],
+        page_error: str | None,
+    ) -> None:
+        keep_browser_tab = False
         try:
             video_file, video_title, video_error, needs_browser_login = await self._download_video(
-                task.url,
+                url,
                 task_id,
             )
             if needs_browser_login:
-                self.repository.mark_browser_login_required(
+                keep_browser_tab = True
+                remaining_actions.append(self._video_login_action(video_error))
+            if remaining_actions:
+                self.repository.mark_manual_action_required(
                     task_id,
-                    video_error=video_error or "浏览器登录需手动确认",
+                    remaining_actions,
+                    video_file=video_file,
+                    video_title=video_title,
+                    video_error=None if needs_browser_login else video_error,
                     page_error=page_error,
                 )
                 return
@@ -780,6 +1030,140 @@ class ArchiveTaskService:
                 await self._enqueue_semantic_task(task_id)
         except Exception as exc:
             self.repository.mark_failed(task_id, str(exc))
+        finally:
+            if not keep_browser_tab:
+                await self._release_browser_tab(
+                    task_id,
+                    ManualActionTarget.VIDEO,
+                )
+
+    async def _retry_page_after_manual_action(
+        self,
+        task: ArchiveTaskRead,
+        manual_action: ManualActionRead,
+        remaining_actions: list[ManualActionRead],
+    ) -> None:
+        result = task.result
+        video_file = result.video_file_name if result else None
+        video_error = result.video_error if result else None
+        try:
+            page_outcome = await self._archive_page(
+                task,
+                f"{task.task_id}.html",
+                reuse_existing_tab=True,
+                manual_action=manual_action,
+            )
+            next_actions = [*remaining_actions, *page_outcome.manual_actions]
+            if next_actions:
+                self.repository.mark_manual_action_required(
+                    task.task_id,
+                    next_actions,
+                    video_file=video_file,
+                    video_title=task.video_title,
+                    video_error=video_error,
+                    page_error=page_outcome.error,
+                )
+                return
+            if page_outcome.error and video_file is None:
+                if video_error:
+                    raise RuntimeError(
+                        f"网页保存失败：{page_outcome.error}；视频下载失败：{video_error}",
+                    )
+                raise RuntimeError(page_outcome.error)
+            self.repository.mark_succeeded(
+                task.task_id,
+                video_file=video_file,
+                video_title=task.video_title,
+                video_error=video_error,
+                page_error=page_outcome.error,
+            )
+            if page_outcome.error is None:
+                await self._enqueue_semantic_task(task.task_id)
+        except Exception as exc:
+            self.repository.mark_failed(task.task_id, str(exc))
+
+    async def _resolve_browser_tab(
+        self,
+        task: ArchiveTaskRead,
+        target: ManualActionTarget,
+    ) -> BrowserTab | None:
+        if not self.archiver.settings.browser_remote_debugging_url:
+            return None
+        tabs = await self.browser_opener.list_tabs()
+        binding = self.repository.get_browser_tab_binding(task.task_id, target)
+        claimed = self.repository.claimed_browser_target_ids(
+            except_task_id=task.task_id,
+        )
+        claimed.update(
+            other.browser_target_id
+            for other in self.repository.list_browser_tab_bindings(task.task_id)
+            if other.target != str(target) and other.browser_target_id
+        )
+        if binding and binding.browser_target_id:
+            exact = next(
+                (
+                    tab
+                    for tab in tabs
+                    if tab.target_id == binding.browser_target_id
+                    and tab.target_id not in claimed
+                ),
+                None,
+            )
+            if exact is not None:
+                self.repository.upsert_browser_tab_binding(
+                    task.task_id,
+                    target,
+                    task.url,
+                    exact.target_id,
+                    last_url=exact.url,
+                    owned_by_reader=binding.owned_by_reader,
+                )
+                return exact
+
+        if binding:
+            self.repository.mark_browser_tab_missing(task.task_id, target)
+        return None
+
+    async def _reconcile_browser_tab_bindings(self) -> None:
+        if not self.archiver.settings.browser_remote_debugging_url:
+            return
+        for binding in self.repository.list_all_browser_tab_bindings():
+            task = self.repository.get(binding.task_id)
+            if task is None or task.status != ArchiveTaskStatus.MANUAL_ACTION_REQUIRED:
+                continue
+            with suppress(RuntimeError):
+                await self._resolve_browser_tab(
+                    task,
+                    ManualActionTarget(binding.target),
+                )
+
+    async def _release_browser_tab(
+        self,
+        task_id: str,
+        target: ManualActionTarget,
+    ) -> None:
+        binding = self.repository.get_browser_tab_binding(task_id, target)
+        if binding and binding.browser_target_id and binding.owned_by_reader:
+            with suppress(RuntimeError):
+                await self.browser_opener.close(binding.browser_target_id)
+        self.repository.delete_browser_tab_binding(task_id, target)
+
+    async def _release_all_browser_tabs(self, task_id: str) -> None:
+        for binding in self.repository.list_browser_tab_bindings(task_id):
+            if binding.browser_target_id and binding.owned_by_reader:
+                with suppress(RuntimeError):
+                    await self.browser_opener.close(binding.browser_target_id)
+        self.repository.delete_browser_tab_bindings(task_id)
+
+    def _video_login_action(self, message: str | None) -> ManualActionRead:
+        return ManualActionRead(
+            code="video_browser_login",
+            kind=ManualActionKind.LOGIN,
+            target=ManualActionTarget.VIDEO,
+            message=message or "请在浏览器完成登录后继续下载视频。",
+            resume=ManualActionResume.CONTINUE_VIDEO,
+            rule_id="video.browser_login",
+        )
 
     async def _download_video(
         self,
@@ -802,6 +1186,12 @@ class ArchiveTaskService:
             lines[-1] if lines else "",
         )
         cleaned = selected.removeprefix("ERROR:").strip() or "未下载到视频。"
+        cleaned = re.sub(
+            r"([?&](?:access_token|auth|key|poc_token|sig|signature|token)=)[^&\s]+",
+            r"\1[已隐藏]",
+            cleaned,
+            flags=re.IGNORECASE,
+        )
         if len(cleaned) > 180:
             return f"{cleaned[:180]}..."
         return cleaned
@@ -908,7 +1298,7 @@ class ArchiveTaskService:
             return [
                 ArchiveTaskStatus.QUEUED,
                 ArchiveTaskStatus.RUNNING,
-                ArchiveTaskStatus.BROWSER_LOGIN_REQUIRED,
+                ArchiveTaskStatus.MANUAL_ACTION_REQUIRED,
             ]
         if value == "failed":
             return [ArchiveTaskStatus.FAILED]

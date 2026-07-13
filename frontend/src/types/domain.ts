@@ -13,7 +13,7 @@ import type {
   UserRead,
 } from "@/client/types.gen";
 
-export type ArchiveTaskStatus = "queued" | "running" | "browser_login_required" | "succeeded" | "failed";
+export type ArchiveTaskStatus = "queued" | "running" | "manual_action_required" | "succeeded" | "failed";
 export type TaskFilter = "unread" | "all" | "running" | "failed";
 
 export type { ArchiveTaskResult, ArchiveTaskCreated, RssFeedRefreshResult };

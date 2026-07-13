@@ -234,7 +234,11 @@ export function TaskList({
 }
 
 function TaskRow({ task, selected, onSelect }: { task: ArchiveTask; selected: boolean; onSelect: () => void }): JSX.Element {
-  const notice = task.status === "failed" ? task.error || task.result?.page_error || task.result?.video_error : null;
+  const notice = task.status === "failed"
+    ? task.error || task.result?.page_error || task.result?.video_error
+    : task.status === "manual_action_required"
+      ? task.manual_actions[0]?.message
+      : null;
   return (
     <button
       className={`task-item ${selected ? "selected" : ""} ${task.is_read ? "is-read" : "is-unread"}`}
@@ -271,7 +275,9 @@ function TaskRow({ task, selected, onSelect }: { task: ArchiveTask; selected: bo
       </span>
       {task.status === "failed" ? (
         <span className="task-status failed">失败</span>
-      ) : ["queued", "running", "browser_login_required"].includes(task.status) ? (
+      ) : task.status === "manual_action_required" ? (
+        <span className="task-status running">需手动处理</span>
+      ) : ["queued", "running"].includes(task.status) ? (
         <span className="task-status running">处理中</span>
       ) : null}
     </button>
@@ -290,7 +296,7 @@ function ArchiveMethod({ tool, label, state }: { tool: "singlefile" | "yt-dlp"; 
 
 export function filterTasks(tasks: ArchiveTask[], taskFilter: TaskFilter): ArchiveTask[] {
   if (taskFilter === "all") return tasks;
-  if (taskFilter === "running") return tasks.filter((task) => ["queued", "running", "browser_login_required"].includes(task.status));
+  if (taskFilter === "running") return tasks.filter((task) => ["queued", "running", "manual_action_required"].includes(task.status));
   if (taskFilter === "failed") return tasks.filter((task) => task.status === "failed");
   return tasks.filter((task) => !task.is_read);
 }
@@ -323,25 +329,31 @@ function dateKey(date: Date): string {
 }
 
 function archiveMethodState(task: ArchiveTask, method: "page" | "video"): string {
+  const waitsForManualAction = task.manual_actions.some((action) => action.target === method);
   if (method === "page") {
     if (task.result?.file_name) return "succeeded";
+    if (waitsForManualAction) return "running";
     if (task.result?.page_error || task.status === "failed") return "failed";
-    if (["queued", "running", "browser_login_required"].includes(task.status)) return "running";
+    if (["queued", "running"].includes(task.status)) return "running";
     return "failed";
   }
   if (task.result?.video_file_name) return "succeeded";
-  if (["queued", "running", "browser_login_required"].includes(task.status)) return "running";
+  if (task.result?.video_error) return "failed";
+  if (waitsForManualAction || ["queued", "running"].includes(task.status)) return "running";
   return "failed";
 }
 
 function archiveMethodLabel(task: ArchiveTask, method: "page" | "video"): string {
+  const waitsForManualAction = task.manual_actions.some((action) => action.target === method);
   if (method === "page") {
     if (task.result?.file_name) return "网页已保存";
+    if (waitsForManualAction) return "网页等待手动处理";
     if (task.result?.page_error || task.status === "failed") return "网页保存失败";
     return "正在保存网页";
   }
   if (task.result?.video_file_name) return "视频已下载";
-  if (task.status === "browser_login_required") return "等待登录后继续下载";
+  if (task.result?.video_error) return "视频下载失败";
+  if (waitsForManualAction) return "视频等待手动处理";
   if (["queued", "running"].includes(task.status)) return "正在尝试下载视频";
   return "视频下载失败";
 }

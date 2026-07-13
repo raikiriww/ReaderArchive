@@ -42,7 +42,6 @@ services:
       READER_CHROME_PATH: /usr/bin/google-chrome
       READER_USE_XVFB: "false"
       READER_BROWSER_DISPLAY: ":1"
-      READER_BROWSER_WAIT_DELAY_MS: ${READER_BROWSER_WAIT_DELAY_MS:-2000}
       READER_BROWSER_LOAD_MAX_TIME_MS: ${READER_BROWSER_LOAD_MAX_TIME_MS:-20000}
       READER_BROWSER_CAPTURE_MAX_TIME_MS: ${READER_BROWSER_CAPTURE_MAX_TIME_MS:-60000}
       READER_DESKTOP_URL: /browser/
@@ -65,3 +64,6 @@ services:
       - ${READER_API_PORT:-38165}:8000
     shm_size: "1gb"
     restart: unless-stopped
+
+volumes:
+  reader_postgres:

@@ -806,7 +806,7 @@ button:disabled,
 .task-status.running,
 .status-label.running,
 .status-label.queued,
-.status-label.login-required {
+.status-label.manual-action {
   border-color: rgba(184, 109, 17, 0.25);
   background: #fff6e8;
   color: var(--warning);
@@ -856,6 +856,58 @@ button:disabled,
   flex-wrap: wrap;
   gap: 9px;
   margin-bottom: 18px;
+}
+
+.manual-action-list {
+  display: grid;
+  gap: 0;
+  margin-bottom: 18px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.manual-action-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 16px;
+  padding: 14px;
+}
+
+.manual-action-row + .manual-action-row {
+  border-top: 1px solid var(--border);
+}
+
+.manual-action-copy {
+  min-width: 0;
+}
+
+.manual-action-heading,
+.manual-action-buttons {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.manual-action-copy p {
+  margin: 5px 0 0;
+  color: var(--text-soft);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.manual-tab-state {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.manual-tab-state.available {
+  color: var(--primary-strong);
+}
+
+.manual-tab-state.missing {
+  color: var(--danger);
 }
 
 .primary-action {
@@ -1517,6 +1569,14 @@ button:disabled,
   .task-pagination,
   .detail-actions,
   .section-line {
+    flex-wrap: wrap;
+  }
+
+  .manual-action-row {
+    grid-template-columns: 1fr;
+  }
+
+  .manual-action-buttons {
     flex-wrap: wrap;
   }
 

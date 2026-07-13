@@ -1,5 +1,5 @@
 import { type ChangeEvent, type FormEvent, type KeyboardEvent, useMemo, useRef, useState } from "react";
-import { Archive, Check, Download, Eye, File, Globe, Pencil, RefreshCw, Trash2, Upload, X, LoaderCircle } from "lucide-react";
+import { Archive, Check, Download, Eye, File, Globe, LoaderCircle, Pencil, Play, RefreshCw, Trash2, Upload, X } from "lucide-react";
 import type { ArchiveFile, ArchiveTag, ArchiveTask } from "../../types/domain";
 import {
   fileSourceLabel,
@@ -22,8 +22,8 @@ interface DetailPanelProps {
   onRefreshFiles: () => void;
   onUploadFile: (file: globalThis.File) => void;
   onDeleteTask: (taskId: string) => void;
-  onContinueVideo: (taskId: string) => void;
-  onOpenBrowser: (taskId: string) => void;
+  onResumeManualAction: (taskId: string, code: string) => void;
+  onOpenBrowser: (taskId: string, actionCode: string) => void;
   onMarkRead: (taskId: string) => void;
   onRearchiveTask: (taskId: string) => void;
   onRenameTask: (task: ArchiveTask, customTitle: string | null) => Promise<void>;
@@ -40,7 +40,7 @@ export function DetailPanel({
   onRefreshFiles,
   onUploadFile,
   onDeleteTask,
-  onContinueVideo,
+  onResumeManualAction,
   onOpenBrowser,
   onMarkRead,
   onRearchiveTask,
@@ -75,7 +75,8 @@ export function DetailPanel({
   const activeTask = task;
   const meta = statusMeta[activeTask.status] || statusMeta.queued;
   const url = safeUrl(activeTask.url);
-  const rearchiveDisabled = ["queued", "running", "browser_login_required"].includes(activeTask.status);
+  const rearchiveDisabled = ["queued", "running"].includes(activeTask.status);
+  const hasManualActions = activeTask.manual_actions.length > 0;
 
   async function submitTitle(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
@@ -143,7 +144,7 @@ export function DetailPanel({
       <div className="detail-header">
         <div>
           <span className={`status-label ${meta.className}`}>
-            <span className={`status-dot ${meta.className === "failed" ? "fail" : meta.className === "queued" || meta.className === "login-required" ? "warning" : "ok"}`} />
+            <span className={`status-dot ${meta.className === "failed" ? "fail" : meta.className === "queued" || meta.className === "manual-action" ? "warning" : "ok"}`} />
             {meta.label}
           </span>
           <div className="detail-title-wrap">
@@ -176,6 +177,57 @@ export function DetailPanel({
         </button>
       </div>
 
+      {task.status === "manual_action_required" ? (
+        <section className="manual-action-list" aria-label="待手动处理事项">
+          {task.manual_actions.map((action) => {
+            const tabState = action.browser_tab_state ?? "not_opened";
+            const tabStateLabel = tabState === "available"
+              ? "已连接"
+              : tabState === "missing"
+                ? "原标签页已丢失"
+                : "尚未打开";
+            const openLabel = tabState === "available"
+              ? "切回处理页面"
+              : tabState === "missing"
+                ? "重新打开处理页面"
+                : "打开处理页面";
+            return (
+              <div className="manual-action-row" key={action.code}>
+                <div className="manual-action-copy">
+                  <div className="manual-action-heading">
+                    <strong>{action.target === "video" ? "视频操作" : "网页操作"}</strong>
+                    <span className={`manual-tab-state ${tabState}`}>{tabStateLabel}</span>
+                  </div>
+                  <p>
+                    {action.message}
+                    {action.target === "page" ? " 继续前请确认处理页面显示的是要保存的内容。" : ""}
+                  </p>
+                </div>
+                <div className="manual-action-buttons">
+                  <button
+                    className="primary-action"
+                    type="button"
+                    onClick={() => onOpenBrowser(task.task_id, action.code)}
+                  >
+                    <Globe size={16} />
+                    {openLabel}
+                  </button>
+                  <button
+                    className="primary-action"
+                    type="button"
+                    disabled={tabState !== "available"}
+                    onClick={() => onResumeManualAction(task.task_id, action.code)}
+                  >
+                    {action.resume === "continue_video" ? <LoaderCircle size={16} /> : <Play size={16} />}
+                    {action.resume === "continue_video" ? "登录后继续下载" : "继续处理"}
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </section>
+      ) : null}
+
       <div className="detail-actions">
         {task.result?.view_url ? (
           <a className="primary-action filled" href={task.result.view_url} target="_blank" rel="noopener noreferrer">
@@ -187,27 +239,17 @@ export function DetailPanel({
           <Globe size={16} />
           打开原网页
         </a>
-        <button className="primary-action" type="button" disabled={rearchiveDisabled} onClick={() => onRearchiveTask(task.task_id)}>
-          <RefreshCw size={16} />
-          重新归档
-        </button>
+        {!hasManualActions ? (
+          <button className="primary-action" type="button" disabled={rearchiveDisabled} onClick={() => onRearchiveTask(task.task_id)}>
+            <RefreshCw size={16} />
+            重新归档
+          </button>
+        ) : null}
         {!task.is_read ? (
           <button className="primary-action" type="button" onClick={() => onMarkRead(task.task_id)}>
             <Check size={16} />
             标记已读
           </button>
-        ) : null}
-        {task.status === "browser_login_required" ? (
-          <>
-            <button className="primary-action" type="button" onClick={() => onOpenBrowser(task.task_id)}>
-              <Globe size={16} />
-              打开浏览器
-            </button>
-            <button className="primary-action" type="button" onClick={() => onContinueVideo(task.task_id)}>
-              <LoaderCircle size={16} />
-              继续下载
-            </button>
-          </>
         ) : null}
         <button className="primary-action" type="button" onClick={startTitleEdit}>
           <Pencil size={16} />

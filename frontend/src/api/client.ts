@@ -11,6 +11,8 @@ import {
   archiveTasksListArchiveTasks,
   archiveTasksMarkArchiveTaskRead,
   archiveTasksOpenArchiveTaskInBrowser,
+  archiveTasksOpenManualActionInBrowser,
+  archiveTasksResumeManualAction,
   archiveTasksUpdateArchiveTask,
   archiveTasksUpdateArchiveTaskFile,
   configReadAppConfig,
@@ -235,8 +237,20 @@ export async function continueArchiveVideo(taskId: string): Promise<void> {
   await readGenerated(archiveTasksContinueArchiveVideo({ path: { task_id: taskId } }));
 }
 
-export async function openArchiveTaskInBrowser(taskId: string): Promise<{ desktop_url?: string }> {
-  return readGenerated<{ desktop_url?: string }>(archiveTasksOpenArchiveTaskInBrowser({ path: { task_id: taskId } }));
+export async function resumeManualAction(taskId: string, code: string): Promise<ArchiveTaskRead> {
+  return readGenerated<ArchiveTaskRead>(
+    archiveTasksResumeManualAction({
+      path: { task_id: taskId },
+      body: { code },
+    }),
+  );
+}
+
+export async function openArchiveTaskInBrowser(taskId: string, actionCode?: string): Promise<{ desktop_url?: string }> {
+  const request = actionCode
+    ? archiveTasksOpenManualActionInBrowser({ path: { task_id: taskId, action_code: actionCode } })
+    : archiveTasksOpenArchiveTaskInBrowser({ path: { task_id: taskId } });
+  return readGenerated<{ desktop_url?: string }>(request);
 }
 
 export async function uploadArchiveTaskFile(taskId: string, file: File): Promise<void> {

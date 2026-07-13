@@ -13,16 +13,18 @@ describe("archive task list", () => {
     const unread = archiveTask({ task_id: "unread", is_read: false });
     const read = archiveTask({ task_id: "read", is_read: true });
     const running = archiveTask({ task_id: "running", status: "running" });
+    const manual = archiveTask({ task_id: "manual", status: "manual_action_required" });
     const failed = archiveTask({ task_id: "failed", status: "failed" });
 
-    expect(filterTasks([unread, read, running, failed], "unread").map((task) => task.task_id)).toEqual([
+    expect(filterTasks([unread, read, running, manual, failed], "unread").map((task) => task.task_id)).toEqual([
       "unread",
       "running",
+      "manual",
       "failed",
     ]);
-    expect(filterTasks([unread, read, running, failed], "all")).toHaveLength(4);
-    expect(filterTasks([unread, read, running, failed], "running")).toEqual([running]);
-    expect(filterTasks([unread, read, running, failed], "failed")).toEqual([failed]);
+    expect(filterTasks([unread, read, running, manual, failed], "all")).toHaveLength(5);
+    expect(filterTasks([unread, read, running, manual, failed], "running")).toEqual([running, manual]);
+    expect(filterTasks([unread, read, running, manual, failed], "failed")).toEqual([failed]);
   });
 
   test("renders selected tasks, search matches, tags, and the RSS action", () => {
@@ -63,6 +65,51 @@ describe("archive task list", () => {
     expect(html).toContain("research");
     expect(html).toContain("订阅源");
     expect(html).toContain("aria-pressed=\"true\"");
+  });
+
+  test("keeps a previous video failure visible while only the page is retrying", () => {
+    const html = renderToStaticMarkup(
+      <TaskList
+        tasks={[
+          archiveTask({
+            status: "running",
+            current_step: "page",
+            result: {
+              file_name: null,
+              download_url: null,
+              view_url: null,
+              video_file_name: null,
+              video_download_url: null,
+              video_error: "unsupported",
+              page_error: null,
+            },
+          }),
+        ]}
+        total={1}
+        selectedTaskId={null}
+        taskFilter="all"
+        searchQuery=""
+        tags={[]}
+        tagFilters={[]}
+        tagMenuOpen={false}
+        limit={50}
+        offset={0}
+        hasMore={false}
+        onPreviousPage={noop}
+        onNextPage={noop}
+        onJumpToPage={noop}
+        onSelectTask={noop}
+        onSetFilter={noop}
+        onSearchQueryChange={noop}
+        onToggleTagMenu={noop}
+        onToggleTag={noop}
+        onClearTags={noop}
+        onOpenRss={noop}
+      />,
+    );
+
+    expect(html).toContain("yt-dlp：视频下载失败");
+    expect(html).not.toContain("yt-dlp：正在尝试下载视频");
   });
 
   test("shows the searched empty state", () => {
@@ -141,8 +188,28 @@ describe("archive detail panel", () => {
   test("renders task actions, files, tags, and login-required controls", () => {
     const html = renderDetail(
       archiveTask({
-        status: "browser_login_required",
-        current_step: "browser_login",
+        status: "manual_action_required",
+        current_step: "manual_action",
+        manual_actions: [
+          {
+            code: "video_browser_login",
+            kind: "login",
+            target: "video",
+            message: "请完成登录",
+            resume: "continue_video",
+            rule_id: "video.browser_login",
+            browser_tab_state: "available",
+          },
+          {
+            code: "wechat_article_verification",
+            kind: "verification",
+            target: "page",
+            message: "请完成微信验证",
+            resume: "retry_page",
+            rule_id: "wechat.mp_article.verification",
+            browser_tab_state: "missing",
+          },
+        ],
         tags: ["video"],
         result: {
           file_name: "reader.html",
@@ -158,11 +225,17 @@ describe("archive detail panel", () => {
 
     expect(html).toContain("Reader article");
     expect(html).toContain("标记已读");
-    expect(html).toContain("打开浏览器");
-    expect(html).toContain("继续下载");
+    expect(html).toContain("切回处理页面");
+    expect(html).toContain("重新打开处理页面");
+    expect(html).toContain("已连接");
+    expect(html).toContain("原标签页已丢失");
+    expect(html).toContain("登录后继续下载");
+    expect(html).toContain("继续处理");
     expect(html).toContain("Reader saved page.html");
     expect(html).toContain("video");
-    expect(html).toContain("打开浏览器完成登录后，再继续下载。");
+    expect(html).toContain("请完成登录");
+    expect(html).toContain("请完成微信验证");
+    expect(html).toContain("继续前请确认处理页面显示的是要保存的内容。");
   });
 });
 
@@ -187,7 +260,7 @@ function renderDetail(task: Parameters<typeof DetailPanel>[0]["task"]): string {
       onRefreshFiles={noop}
       onUploadFile={noop}
       onDeleteTask={noop}
-      onContinueVideo={noop}
+      onResumeManualAction={noop}
       onOpenBrowser={noop}
       onMarkRead={noop}
       onRearchiveTask={noop}

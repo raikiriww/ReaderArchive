@@ -3,7 +3,7 @@ import type { ArchiveTask, ArchiveTaskStatus } from "../types/domain";
 export const statusMeta: Record<ArchiveTaskStatus, { label: string; className: string }> = {
   queued: { label: "排队中", className: "queued" },
   running: { label: "处理中", className: "running" },
-  browser_login_required: { label: "需登录", className: "login-required" },
+  manual_action_required: { label: "需手动处理", className: "manual-action" },
   succeeded: { label: "已完成", className: "succeeded" },
   failed: { label: "失败", className: "failed" },
 };
@@ -53,7 +53,10 @@ export function taskTitle(task: ArchiveTask): string {
 
 export function shortError(value: string | null | undefined): string {
   const firstLine = String(value || "").split(/\r?\n/).find(Boolean) || "存档失败";
-  const cleaned = firstLine.replace(/\s+/g, " ").trim();
+  const cleaned = firstLine
+    .replace(/([?&](?:access_token|auth|key|poc_token|sig|signature|token)=)[^&\s]+/gi, "$1[已隐藏]")
+    .replace(/\s+/g, " ")
+    .trim();
   return cleaned.length > 160 ? `${cleaned.slice(0, 160)}...` : cleaned;
 }
 
@@ -68,7 +71,7 @@ export function stepLabel(value: string | null): string {
   if (value === "queued") return "排队中";
   if (value === "page+video") return "保存网页和下载视频";
   if (value === "video") return "尝试下载视频";
-  if (value === "browser_login") return "等待浏览器登录确认";
+  if (value === "manual_action") return "等待手动处理";
   if (value === "page") return "保存网页";
   return "—";
 }
@@ -87,11 +90,12 @@ export function taskNotices(task: ArchiveTask): Array<{ type: "error" | "warning
     notices.push({ type: "warning", text: `视频已保存，网页未保存：${shortError(task.result.page_error)}` });
   }
   if (task.result?.video_error) {
-    notices.push({ type: "warning", text: `网页已保存，未下载到视频：${shortError(task.result.video_error)}` });
+    const prefix = task.result.file_name ? "网页已保存，视频未保存" : "视频未保存";
+    notices.push({ type: "warning", text: `${prefix}：${shortError(task.result.video_error)}` });
   }
-  if (task.status === "browser_login_required") {
-    notices.push({ type: "warning", text: "打开浏览器完成登录后，再继续下载。" });
-  }
+  task.manual_actions.forEach((action) => {
+    notices.push({ type: "warning", text: action.message });
+  });
   return notices;
 }
 
@@ -102,5 +106,6 @@ export function taskFileKey(task: ArchiveTask): string {
     task.result?.video_file_name || "",
     task.result?.page_error || "",
     task.result?.video_error || "",
+    task.manual_actions.map((action) => action.code).join(","),
   ].join("|");
 }

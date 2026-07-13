@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import signal
 import tempfile
-from contextlib import suppress
+from contextlib import nullcontext, suppress
+from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import quote
 from urllib.request import Request, urlopen
@@ -16,14 +18,24 @@ class BrowserLoginRequiredError(RuntimeError):
     pass
 
 
+class BrowserTabNotFoundError(RuntimeError):
+    pass
+
+
+@dataclass(frozen=True)
+class BrowserTab:
+    target_id: str
+    url: str
+    title: str = ""
+
+
 class BrowserOpener:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
 
-    async def open(self, url: str) -> None:
+    async def open(self, url: str) -> BrowserTab | None:
         if self.settings.browser_remote_debugging_url:
-            await asyncio.to_thread(self._open_remote_tab, url)
-            return
+            return await asyncio.to_thread(self._open_remote_tab, url)
 
         profile_dir = self.settings.browser_profile_dir
         home_dir = self._browser_home_dir(profile_dir)
@@ -55,7 +67,7 @@ class BrowserOpener:
         try:
             stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=5)
         except TimeoutError:
-            return
+            return None
 
         if process.returncode != 0:
             output = "\n".join(
@@ -68,18 +80,98 @@ class BrowserOpener:
             )
             msg = output[-1000:] if output else "Chrome failed to open the URL."
             raise RuntimeError(msg)
+        return None
 
-    def _open_remote_tab(self, url: str) -> None:
+    async def list_tabs(self) -> list[BrowserTab]:
+        if not self.settings.browser_remote_debugging_url:
+            return []
+        return await asyncio.to_thread(self._list_remote_tabs)
+
+    async def get(self, target_id: str) -> BrowserTab | None:
+        tabs = await self.list_tabs()
+        return next((tab for tab in tabs if tab.target_id == target_id), None)
+
+    async def activate(self, target_id: str) -> BrowserTab:
+        if not self.settings.browser_remote_debugging_url:
+            msg = "Chrome remote debugging endpoint is unavailable."
+            raise RuntimeError(msg)
+        tab = await self.get(target_id)
+        if tab is None:
+            raise BrowserTabNotFoundError("The browser tab is no longer open.")
+        await asyncio.to_thread(self._remote_command, "activate", target_id)
+        return tab
+
+    async def close(self, target_id: str) -> bool:
+        if not self.settings.browser_remote_debugging_url:
+            return False
+        if await self.get(target_id) is None:
+            return False
+        await asyncio.to_thread(self._remote_command, "close", target_id)
+        return True
+
+    def _open_remote_tab(self, url: str) -> BrowserTab:
         remote_url = self.settings.browser_remote_debugging_url
         assert remote_url is not None
         endpoint = f"{remote_url.rstrip('/')}/json/new?{quote(url, safe='')}"
         request = Request(endpoint, method="PUT")
         try:
             with urlopen(request, timeout=5) as response:
-                response.read()
+                value = json.loads(response.read().decode("utf-8"))
         except Exception as exc:
             msg = "Chrome remote debugging endpoint is unavailable."
             raise RuntimeError(msg) from exc
+        tab = self._tab_from_value(value)
+        if tab is None:
+            msg = "Chrome did not return the new browser tab."
+            raise RuntimeError(msg)
+        return tab
+
+    def _list_remote_tabs(self) -> list[BrowserTab]:
+        remote_url = self.settings.browser_remote_debugging_url
+        assert remote_url is not None
+        request = Request(f"{remote_url.rstrip('/')}/json/list")
+        try:
+            with urlopen(request, timeout=5) as response:
+                values = json.loads(response.read().decode("utf-8"))
+        except Exception as exc:
+            msg = "Chrome remote debugging endpoint is unavailable."
+            raise RuntimeError(msg) from exc
+        if not isinstance(values, list):
+            return []
+        return [
+            tab
+            for value in values
+            if isinstance(value, dict)
+            and value.get("type") == "page"
+            and (tab := self._tab_from_value(value)) is not None
+        ]
+
+    def _remote_command(self, command: str, target_id: str) -> None:
+        remote_url = self.settings.browser_remote_debugging_url
+        assert remote_url is not None
+        endpoint = f"{remote_url.rstrip('/')}/json/{command}/{quote(target_id, safe='')}"
+        try:
+            with urlopen(Request(endpoint), timeout=5) as response:
+                response.read()
+        except Exception as exc:
+            if command in {"activate", "close"}:
+                raise BrowserTabNotFoundError("The browser tab is no longer open.") from exc
+            msg = "Chrome remote debugging endpoint is unavailable."
+            raise RuntimeError(msg) from exc
+
+    def _tab_from_value(self, value: object) -> BrowserTab | None:
+        if not isinstance(value, dict):
+            return None
+        target_id = value.get("id")
+        url = value.get("url")
+        title = value.get("title")
+        if not isinstance(target_id, str) or not isinstance(url, str):
+            return None
+        return BrowserTab(
+            target_id=target_id,
+            url=url,
+            title=title if isinstance(title, str) else "",
+        )
 
     def _browser_home_dir(self, profile_dir: Path) -> Path:
         if profile_dir.parent.name == ".config":
@@ -127,7 +219,14 @@ class SingleFileArchiver:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
 
-    async def archive(self, url: str, output_file: str) -> None:
+    async def archive(
+        self,
+        url: str,
+        output_file: str,
+        *,
+        browser_target_id: str | None = None,
+        skip_navigation: bool = False,
+    ) -> None:
         archive_dir = self.settings.archive_dir
         profile_dir = self.settings.browser_profile_dir
         home_dir = self._browser_home_dir(profile_dir)
@@ -138,12 +237,19 @@ class SingleFileArchiver:
 
         output_path = archive_dir / output_file
         cache_context = (
-            suppress()
+            nullcontext()
             if self.settings.browser_remote_debugging_url
             else tempfile.TemporaryDirectory(prefix="reader-singlefile-cache-")
         )
         with cache_context as cache_dir:
-            command = self._archive_command(url, output_path, profile_dir, cache_dir)
+            command = self._archive_command(
+                url,
+                output_path,
+                profile_dir,
+                cache_dir,
+                browser_target_id=browser_target_id,
+                skip_navigation=skip_navigation,
+            )
             environment = {
                 **os.environ,
                 "HOME": str(home_dir),
@@ -189,23 +295,37 @@ class SingleFileArchiver:
         output_path: Path,
         profile_dir: Path,
         cache_dir: str | None,
+        *,
+        browser_target_id: str | None = None,
+        skip_navigation: bool = False,
     ) -> list[str]:
         command = self._command_prefix() + [
             self.settings.single_file_path,
             url,
             str(output_path),
-            "--browser-wait-until=load",
+            "--browser-wait-until=networkIdle",
+            "--browser-wait-until-delay=0",
+            "--browser-wait-until-fallback=false",
             f"--browser-load-max-time={self.settings.browser_load_max_time_ms}",
             f"--browser-capture-max-time={self.settings.browser_capture_max_time_ms}",
-            "--load-deferred-images=false",
-            "--http-header=Cache-Control=no-cache",
-            "--http-header=Pragma=no-cache",
-            f"--browser-wait-delay={self.settings.browser_wait_delay_ms}",
+            "--load-deferred-images=true",
+            "--load-deferred-images-dispatch-scroll-event=true",
+            "--load-deferred-images-max-idle-time=5000",
+            "--remove-unused-styles=false",
+            "--remove-alternative-medias=false",
             "--filename-conflict-action=overwrite",
         ]
         if self.settings.browser_remote_debugging_url:
             command.append(f"--browser-server={self.settings.browser_remote_debugging_url}")
+            if browser_target_id:
+                command.append(f"--browser-target-id={browser_target_id}")
+                if skip_navigation:
+                    command.append("--browser-skip-navigation=true")
             return command
+
+        if browser_target_id:
+            msg = "Saving an existing browser tab requires Chrome remote debugging."
+            raise RuntimeError(msg)
 
         command.extend(
             [

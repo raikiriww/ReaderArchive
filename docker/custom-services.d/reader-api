@@ -13,6 +13,7 @@ fi
 
 export VIRTUAL_ENV=/app/backend/.venv
 export PATH="/app/backend/.venv/bin:${PATH}"
+export READER_BROWSER_REMOTE_DEBUGGING_URL="${READER_BROWSER_REMOTE_DEBUGGING_URL:-http://127.0.0.1:9222}"
 
 archive_dir="${READER_ARCHIVE_DIR:-/app/data/archive}"
 browser_profile_dir="${READER_BROWSER_PROFILE_DIR:-/config/.config/reader-archive-profile}"
