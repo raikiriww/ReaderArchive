@@ -25,7 +25,6 @@ class Settings(BaseSettings):
     chrome_path: str = "/usr/bin/google-chrome"
     use_xvfb: bool = True
     browser_display: str = ":1"
-    browser_wait_delay_ms: int = 2000
     browser_load_max_time_ms: int = 20000
     browser_capture_max_time_ms: int = 60000
     archive_timeout_seconds: int = 120

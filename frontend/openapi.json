@@ -172,11 +172,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": {
-                    "type": "string"
-                  },
-                  "type": "object",
-                  "title": "Response Health-Health"
+                  "$ref": "#/components/schemas/HealthRead"
                 }
               }
             }
@@ -1125,6 +1121,110 @@
         }
       }
     },
+    "/api/v1/archive-tasks/{task_id}/rearchive": {
+      "post": {
+        "tags": [
+          "archive-tasks"
+        ],
+        "summary": "Rearchive Task",
+        "operationId": "archive-tasks-rearchive_task",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Task Id"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArchiveTaskRead"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/archive-tasks/{task_id}/resume-manual-action": {
+      "post": {
+        "tags": [
+          "archive-tasks"
+        ],
+        "summary": "Resume Manual Action",
+        "operationId": "archive-tasks-resume_manual_action",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Task Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ManualActionResumeRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArchiveTaskRead"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/archive-tasks/{task_id}/continue-video": {
       "post": {
         "tags": [
@@ -1206,6 +1306,66 @@
                     "type": "string"
                   },
                   "title": "Response Archive-Tasks-Open Archive Task In Browser"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/archive-tasks/{task_id}/manual-actions/{action_code}/open-browser": {
+      "post": {
+        "tags": [
+          "archive-tasks"
+        ],
+        "summary": "Open Manual Action In Browser",
+        "operationId": "archive-tasks-open_manual_action_in_browser",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Task Id"
+            }
+          },
+          {
+            "name": "action_code",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Action Code"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Archive-Tasks-Open Manual Action In Browser"
                 }
               }
             }
@@ -1639,6 +1799,16 @@
           "rss_refresh_interval_seconds": {
             "type": "integer",
             "title": "Rss Refresh Interval Seconds"
+          },
+          "semantic_search": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SemanticHealthRead"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",
@@ -1799,6 +1969,42 @@
         ],
         "title": "ArchiveTaskFileUpdate"
       },
+      "ArchiveTaskListRead": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ArchiveTaskRead"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "limit": {
+            "type": "integer",
+            "title": "Limit"
+          },
+          "offset": {
+            "type": "integer",
+            "title": "Offset",
+            "default": 0
+          },
+          "has_more": {
+            "type": "boolean",
+            "title": "Has More"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "total",
+          "limit",
+          "has_more"
+        ],
+        "title": "ArchiveTaskListRead"
+      },
       "ArchiveTaskRead": {
         "properties": {
           "task_id": {
@@ -1856,6 +2062,13 @@
               }
             ],
             "title": "Current Step"
+          },
+          "manual_actions": {
+            "items": {
+              "$ref": "#/components/schemas/ManualActionRead"
+            },
+            "type": "array",
+            "title": "Manual Actions"
           },
           "source_type": {
             "$ref": "#/components/schemas/ArchiveTaskSourceType",
@@ -1965,45 +2178,10 @@
           "url",
           "status",
           "created_at",
+          "manual_actions",
           "display_title"
         ],
         "title": "ArchiveTaskRead"
-      },
-      "ArchiveTaskListRead": {
-        "properties": {
-          "items": {
-            "items": {
-              "$ref": "#/components/schemas/ArchiveTaskRead"
-            },
-            "type": "array",
-            "title": "Items"
-          },
-          "total": {
-            "type": "integer",
-            "title": "Total"
-          },
-          "limit": {
-            "type": "integer",
-            "title": "Limit"
-          },
-          "offset": {
-            "type": "integer",
-            "title": "Offset",
-            "default": 0
-          },
-          "has_more": {
-            "type": "boolean",
-            "title": "Has More"
-          }
-        },
-        "type": "object",
-        "required": [
-          "items",
-          "total",
-          "limit",
-          "has_more"
-        ],
-        "title": "ArchiveTaskListRead"
       },
       "ArchiveTaskResult": {
         "properties": {
@@ -2119,7 +2297,7 @@
         "enum": [
           "queued",
           "running",
-          "browser_login_required",
+          "manual_action_required",
           "succeeded",
           "failed"
         ],
@@ -2234,6 +2412,15 @@
         ],
         "title": "Body_login-login_access_token"
       },
+      "BrowserTabState": {
+        "type": "string",
+        "enum": [
+          "available",
+          "not_opened",
+          "missing"
+        ],
+        "title": "BrowserTabState"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -2246,6 +2433,29 @@
         },
         "type": "object",
         "title": "HTTPValidationError"
+      },
+      "HealthRead": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "semantic_search": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SemanticHealthRead"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "status"
+        ],
+        "title": "HealthRead"
       },
       "LoginRequest": {
         "properties": {
@@ -2268,6 +2478,85 @@
           "password"
         ],
         "title": "LoginRequest"
+      },
+      "ManualActionKind": {
+        "type": "string",
+        "enum": [
+          "login",
+          "verification",
+          "confirmation"
+        ],
+        "title": "ManualActionKind"
+      },
+      "ManualActionRead": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/ManualActionKind"
+          },
+          "target": {
+            "$ref": "#/components/schemas/ManualActionTarget"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "resume": {
+            "$ref": "#/components/schemas/ManualActionResume"
+          },
+          "rule_id": {
+            "type": "string",
+            "title": "Rule Id"
+          },
+          "browser_tab_state": {
+            "$ref": "#/components/schemas/BrowserTabState",
+            "default": "not_opened"
+          }
+        },
+        "type": "object",
+        "required": [
+          "code",
+          "kind",
+          "target",
+          "message",
+          "resume",
+          "rule_id"
+        ],
+        "title": "ManualActionRead"
+      },
+      "ManualActionResume": {
+        "type": "string",
+        "enum": [
+          "retry_page",
+          "continue_video"
+        ],
+        "title": "ManualActionResume"
+      },
+      "ManualActionResumeRequest": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Code"
+          }
+        },
+        "type": "object",
+        "required": [
+          "code"
+        ],
+        "title": "ManualActionResumeRequest"
+      },
+      "ManualActionTarget": {
+        "type": "string",
+        "enum": [
+          "page",
+          "video"
+        ],
+        "title": "ManualActionTarget"
       },
       "PasswordChange": {
         "properties": {
@@ -2435,6 +2724,70 @@
         },
         "type": "object",
         "title": "RssFeedUpdate"
+      },
+      "SemanticHealthRead": {
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled"
+          },
+          "available": {
+            "type": "boolean",
+            "title": "Available"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "model_name": {
+            "type": "string",
+            "title": "Model Name"
+          },
+          "embedding_dimensions": {
+            "type": "integer",
+            "title": "Embedding Dimensions"
+          },
+          "text_version": {
+            "type": "string",
+            "title": "Text Version"
+          },
+          "queued_count": {
+            "type": "integer",
+            "title": "Queued Count",
+            "default": 0
+          },
+          "indexed_count": {
+            "type": "integer",
+            "title": "Indexed Count",
+            "default": 0
+          },
+          "failed_count": {
+            "type": "integer",
+            "title": "Failed Count",
+            "default": 0
+          },
+          "last_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Error"
+          }
+        },
+        "type": "object",
+        "required": [
+          "enabled",
+          "available",
+          "status",
+          "model_name",
+          "embedding_dimensions",
+          "text_version"
+        ],
+        "title": "SemanticHealthRead"
       },
       "Token": {
         "properties": {

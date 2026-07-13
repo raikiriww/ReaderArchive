@@ -12,8 +12,6 @@ __pycache__/
 .mypy_cache/
 .coverage
 htmlcov/
-data/archive/
-data/browser/
-data/postgres/
+data/
 .local_eval/
 .local_verify/

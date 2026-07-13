@@ -62,7 +62,7 @@ def wait_for_finished(client: TestClient, task_id: str) -> dict:
         task_response = client.get(f"/api/v1/archive-tasks/{task_id}")
         assert task_response.status_code == 200
         task = task_response.json()
-        if task["status"] in {"succeeded", "failed", "browser_login_required"}:
+        if task["status"] in {"succeeded", "failed", "manual_action_required"}:
             return task
         sleep(0.05)
     pytest.fail("Archive task did not finish.")
@@ -1388,11 +1388,19 @@ def test_video_4xx_waits_for_browser_login_and_can_continue(
         task_id = response.json()["task_id"]
         task = wait_for_finished(client, task_id)
 
-        assert task["status"] == "browser_login_required"
+        assert task["status"] == "manual_action_required"
+        assert len(task["manual_actions"]) == 1
+        video_action = task["manual_actions"][0]
+        assert video_action["code"] == "video_browser_login"
+        assert video_action["kind"] == "login"
+        assert video_action["target"] == "video"
+        assert video_action["message"].startswith("浏览器登录需手动确认")
+        assert video_action["resume"] == "continue_video"
+        assert video_action["rule_id"] == "video.browser_login"
         assert task["result"]["file_name"] == f"{task_id}.html"
         assert task["result"]["video_file_name"] is None
         assert task["result"]["video_download_url"] is None
-        assert "浏览器登录需手动确认" in task["result"]["video_error"]
+        assert task["result"]["video_error"] is None
 
         continue_response = client.post(f"/api/v1/archive-tasks/{task_id}/continue-video")
         assert continue_response.status_code == 202
@@ -1405,6 +1413,150 @@ def test_video_4xx_waits_for_browser_login_and_can_continue(
         video_response = client.get(f"/api/v1/archive-tasks/{task_id}/result/video")
         assert video_response.status_code == 200
         assert video_response.content == b"fake video after login"
+
+
+def test_wechat_verification_requires_manual_action_and_can_rearchive(
+    tmp_path: Path,
+    fake_failing_yt_dlp: Path,
+) -> None:
+    fake_single_file = tmp_path / "single-file-wechat"
+    fake_single_file.write_text(
+        """#!/usr/bin/env python3
+import pathlib
+import sys
+
+output = pathlib.Path(sys.argv[2])
+marker = output.parent / "wechat-verified"
+if marker.exists():
+    output.write_text(
+        "<html><head><title>正常微信文章</title></head>"
+        "<body><article id='js_article'>正文内容</article></body></html>",
+        encoding="utf-8",
+    )
+else:
+    output.write_text(
+        "<html><head><title>Weixin Official Accounts Platform</title></head><body>"
+        "<h2>环境异常</h2><p>当前环境异常，完成验证后即可继续访问。</p>"
+        "<a id='js_verify'>去验证</a><iframe id='tcaptcha_iframe_dy'></iframe>"
+        "</body></html>",
+        encoding="utf-8",
+    )
+    marker.write_text("verified", encoding="utf-8")
+""",
+        encoding="utf-8",
+    )
+    fake_single_file.chmod(0o755)
+    settings = Settings(
+        database_url=make_database_url(),
+        archive_dir=tmp_path / "archive",
+        browser_profile_dir=tmp_path / "profile",
+        single_file_path=str(fake_single_file),
+        yt_dlp_path=str(fake_failing_yt_dlp),
+        chrome_path="/bin/true",
+        use_xvfb=False,
+        semantic_search_enabled=False,
+    )
+    app = create_app(settings)
+
+    with TestClient(app) as client:
+        login_as_admin(client)
+        response = client.post(
+            "/api/v1/archive-tasks",
+            json={"url": "https://mp.weixin.qq.com/s/example"},
+        )
+        task_id = response.json()["task_id"]
+        task = wait_for_finished(client, task_id)
+
+        assert task["status"] == "manual_action_required"
+        assert task["entry_title"] is None
+        assert task["finished_at"] is None
+        assert task["result"]["file_name"] is None
+        assert task["result"]["view_url"] is None
+        assert task["manual_actions"] == [
+            {
+                "code": "wechat_article_verification",
+                "kind": "verification",
+                "target": "page",
+                "message": "微信要求完成访问验证，正文尚未保存。",
+                "resume": "retry_page",
+                "rule_id": "wechat.mp_article.verification",
+                "browser_tab_state": "not_opened",
+            }
+        ]
+        assert not (settings.archive_dir / f"{task_id}.html").exists()
+        assert client.get(f"/api/v1/archive-tasks/{task_id}/file-list").json() == []
+        assert client.post(f"/api/v1/archive-tasks/{task_id}/continue-video").status_code == 409
+
+        resume_response = client.post(
+            f"/api/v1/archive-tasks/{task_id}/resume-manual-action",
+            json={"code": "wechat_article_verification"},
+        )
+        assert resume_response.status_code == 202
+        assert resume_response.json()["result"]["file_name"] is None
+        assert resume_response.json()["result"]["video_error"] is not None
+        task = wait_for_finished(client, task_id)
+
+        assert task["status"] == "succeeded"
+        assert task["manual_actions"] == []
+        assert task["entry_title"] == "正常微信文章"
+        assert task["result"]["file_name"] == f"{task_id}.html"
+
+
+def test_page_and_video_manual_actions_are_preserved_together(
+    tmp_path: Path,
+    fake_4xx_then_success_yt_dlp: Path,
+) -> None:
+    fake_single_file = tmp_path / "single-file-wechat-verification"
+    fake_single_file.write_text(
+        """#!/usr/bin/env python3
+import pathlib
+import sys
+
+pathlib.Path(sys.argv[2]).write_text(
+    "<html><body><h2>环境异常</h2>"
+    "<p>完成验证后即可继续访问。</p><a id='js_verify'>去验证</a></body></html>",
+    encoding="utf-8",
+)
+""",
+        encoding="utf-8",
+    )
+    fake_single_file.chmod(0o755)
+    settings = Settings(
+        database_url=make_database_url(),
+        archive_dir=tmp_path / "archive",
+        browser_profile_dir=tmp_path / "profile",
+        single_file_path=str(fake_single_file),
+        yt_dlp_path=str(fake_4xx_then_success_yt_dlp),
+        chrome_path="/bin/true",
+        use_xvfb=False,
+        semantic_search_enabled=False,
+    )
+    app = create_app(settings)
+
+    with TestClient(app) as client:
+        login_as_admin(client)
+        response = client.post(
+            "/api/v1/archive-tasks",
+            json={"url": "https://mp.weixin.qq.com/s/example"},
+        )
+        task_id = response.json()["task_id"]
+        task = wait_for_finished(client, task_id)
+
+        assert task["status"] == "manual_action_required"
+        assert {action["code"] for action in task["manual_actions"]} == {
+            "wechat_article_verification",
+            "video_browser_login",
+        }
+
+        continue_response = client.post(f"/api/v1/archive-tasks/{task_id}/continue-video")
+        assert continue_response.status_code == 202
+        task = wait_for_finished(client, task_id)
+
+        assert task["status"] == "manual_action_required"
+        assert [action["code"] for action in task["manual_actions"]] == [
+            "wechat_article_verification"
+        ]
+        assert task["result"]["video_file_name"] == f"{task_id}.mp4"
 
 
 def test_open_task_in_browser_passes_task_url_to_chrome(
@@ -1686,8 +1838,18 @@ output_path.with_suffix(".args").write_text("\\n".join(sys.argv[3:]), encoding="
     assert "--browser-arg=--media-cache-size=1" in args
     assert "--browser-arg=--disable-cache" in args
     assert "--browser-arg=--disable-application-cache" in args
-    assert "--http-header=Cache-Control=no-cache" in args
-    assert "--http-header=Pragma=no-cache" in args
+    assert "--http-header=Cache-Control=no-cache" not in args
+    assert "--http-header=Pragma=no-cache" not in args
+    assert "--browser-wait-until=networkIdle" in args
+    assert "--browser-wait-until-delay=0" in args
+    assert "--browser-wait-until-fallback=false" in args
+    assert not any(arg.startswith("--browser-wait-delay=") for arg in args)
+    assert "--load-deferred-images=true" in args
+    assert "--load-deferred-images-dispatch-scroll-event=true" in args
+    assert "--load-deferred-images-max-idle-time=5000" in args
+    assert "--load-deferred-images=false" not in args
+    assert "--remove-unused-styles=false" in args
+    assert "--remove-alternative-medias=false" in args
 
 
 def test_singlefile_archive_can_use_running_chrome_debug_endpoint(
@@ -1712,11 +1874,25 @@ def test_singlefile_archive_can_use_running_chrome_debug_endpoint(
         settings.archive_dir / "page.html",
         settings.browser_profile_dir,
         None,
+        browser_target_id="reader-tab-1",
+        skip_navigation=True,
     )
 
     assert "--browser-server=http://127.0.0.1:9222" in args
-    assert "--http-header=Cache-Control=no-cache" in args
-    assert "--http-header=Pragma=no-cache" in args
+    assert "--browser-target-id=reader-tab-1" in args
+    assert "--browser-skip-navigation=true" in args
+    assert "--http-header=Cache-Control=no-cache" not in args
+    assert "--http-header=Pragma=no-cache" not in args
+    assert "--browser-wait-until=networkIdle" in args
+    assert "--browser-wait-until-delay=0" in args
+    assert "--browser-wait-until-fallback=false" in args
+    assert not any(arg.startswith("--browser-wait-delay=") for arg in args)
+    assert "--load-deferred-images=true" in args
+    assert "--load-deferred-images-dispatch-scroll-event=true" in args
+    assert "--load-deferred-images-max-idle-time=5000" in args
+    assert "--load-deferred-images=false" not in args
+    assert "--remove-unused-styles=false" in args
+    assert "--remove-alternative-medias=false" in args
     assert not any(arg.startswith("--browser-arg=--user-data-dir=") for arg in args)
     assert not any(arg.startswith("--browser-executable-path=") for arg in args)
 
@@ -1737,6 +1913,19 @@ ERROR: [BiliBili] Unable to download JSON metadata: HTTP Error 412: Precondition
         "[BiliBili] Unable to download JSON metadata: "
         "HTTP Error 412: Precondition Failed"
     )
+
+
+def test_short_error_redacts_sensitive_query_values() -> None:
+    from app.service import ArchiveTaskService
+
+    service = ArchiveTaskService.__new__(ArchiveTaskService)
+    error = service._short_error(
+        "Unsupported URL: https://mp.weixin.qq.com/mp/captcha?poc_token=secret-value"
+        "&target_url=https%3A%2F%2Fmp.weixin.qq.com%2Fs%2Fexample",
+    )
+
+    assert "secret-value" not in error
+    assert "poc_token=[已隐藏]" in error
 
 
 def test_missing_task_returns_404(tmp_path: Path, fake_single_file: Path) -> None:

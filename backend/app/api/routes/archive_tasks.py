@@ -19,6 +19,7 @@ from app.models import (
     ArchiveTaskListRead,
     ArchiveTaskRead,
     ArchiveTaskUpdate,
+    ManualActionResumeRequest,
 )
 from app.service import ArchiveTaskService
 
@@ -207,6 +208,24 @@ def create_router() -> APIRouter:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     @router.post(
+        "/archive-tasks/{task_id}/resume-manual-action",
+        response_model=ArchiveTaskRead,
+        status_code=status.HTTP_202_ACCEPTED,
+    )
+    async def resume_manual_action(
+        task_id: str,
+        payload: ManualActionResumeRequest,
+        request: Request,
+    ) -> ArchiveTaskRead:
+        service = get_archive_task_service(request)
+        try:
+            return await service.resume_manual_action(task_id, payload.code)
+        except ValueError as exc:
+            if str(exc) == "Archive task not found.":
+                raise HTTPException(status_code=404, detail=str(exc)) from exc
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @router.post(
         "/archive-tasks/{task_id}/continue-video",
         response_model=ArchiveTaskRead,
         status_code=status.HTTP_202_ACCEPTED,
@@ -226,16 +245,36 @@ def create_router() -> APIRouter:
         try:
             await service.open_task_in_browser(task_id)
         except ValueError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
+            status_code = 404 if str(exc) == "Archive task not found." else 409
+            raise HTTPException(status_code=status_code, detail=str(exc)) from exc
         except RuntimeError as exc:
-            raise HTTPException(status_code=500, detail=str(exc)) from exc
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return {"desktop_url": request.app.state.settings.desktop_url}
+
+    @router.post(
+        "/archive-tasks/{task_id}/manual-actions/{action_code}/open-browser",
+        status_code=status.HTTP_202_ACCEPTED,
+    )
+    async def open_manual_action_in_browser(
+        task_id: str,
+        action_code: str,
+        request: Request,
+    ) -> dict[str, str]:
+        service = get_archive_task_service(request)
+        try:
+            await service.open_task_in_browser(task_id, action_code)
+        except ValueError as exc:
+            status_code = 404 if str(exc) == "Archive task not found." else 409
+            raise HTTPException(status_code=status_code, detail=str(exc)) from exc
+        except RuntimeError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
         return {"desktop_url": request.app.state.settings.desktop_url}
 
     @router.delete("/archive-tasks/{task_id}", status_code=status.HTTP_204_NO_CONTENT)
     async def delete_archive_task(task_id: str, request: Request) -> None:
         service = get_archive_task_service(request)
         try:
-            deleted = service.delete_task(task_id)
+            deleted = await service.delete_task(task_id)
         except ValueError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         if not deleted:

@@ -1,0 +1,127 @@
+diff --git a/options.js b/options.js
+index 41499ef..f20d3c0 100644
+--- a/options.js
++++ b/options.js
+@@ -51,6 +51,8 @@ const OPTION_GROUPS = [
+
+ const OPTIONS_INFO = [{
+ 	"browser-server": { description: "Server to connect to", type: "string" },
++	"browser-target-id": { description: "Existing browser target to capture", type: "string" },
++	"browser-skip-navigation": { description: "Capture the current target without navigating", type: "boolean" },
+ 	"browser-headless": { description: "Run the browser in headless mode", type: "boolean", defaultValue: true },
+ 	"browser-executable-path": { description: "Path to chrome/chromium executable", type: "string" },
+ 	"browser-width": { description: "Width of the browser viewport in pixels", type: "number", defaultValue: 1280 },
+diff --git a/lib/cdp-client.js b/lib/cdp-client.js
+index c54ad58..9bad85f 100644
+--- a/lib/cdp-client.js
++++ b/lib/cdp-client.js
+@@ -56,6 +56,7 @@ export {
+ 	closeBrowser
+ };
+
++let browserApiUrl;
+ async function initialize(singleFileOptions) {
+ 	if (singleFileOptions.browserServer) {
+ 		options.apiUrl = singleFileOptions.browserServer;
+@@ -76,6 +77,7 @@ async function initialize(singleFileOptions) {
+ 		browserOptions.httpProxyServer = singleFileOptions.httpProxyServer;
+ 		options.apiUrl = LOCALHOST + (await launchBrowser(browserOptions));
+ 	}
++	browserApiUrl = options.apiUrl;
+ }
+
+ async function getPageData(options) {
+@@ -89,7 +91,10 @@ async function getPageData(options) {
+ 	let targetInfo;
++	let cdp;
+ 	try {
+ 		logData(["Loading page", EMPTY_PAGE_URL], pageContext);
+-		targetInfo = await CDP.createTarget(EMPTY_PAGE_URL);
++		targetInfo = options.browserTargetId
++			? await getExistingTarget(options.browserTargetId)
++			: await CDP.createTarget(EMPTY_PAGE_URL);
+-		const cdp = new CDP(targetInfo);
++		cdp = new CDP(targetInfo);
+ 		await setupConsoleLogging(cdp, pageContext);
+ 		await setupBrowserWindow(cdp, targetInfo.id, pageContext);
+@@ -119,6 +124,9 @@ async function getPageData(options) {
+ 	} finally {
+ 		logData(["Closing page"], pageContext);
+ 		await closeTarget();
++		if (cdp && cdp.connection && options.browserTargetId) {
++			cdp.connection.close();
++		}
+ 		logData(["Finishing"], pageContext);
+ 	}
+
+@@ -131,13 +139,26 @@ async function getPageData(options) {
+ 	}
+
+ 	async function closeTarget() {
+-		if (targetInfo && !options.browserDebug) {
++		if (targetInfo && !options.browserDebug && !options.browserTargetId) {
+ 			await CDP.closeTarget(targetInfo.id);
+ 			targetInfo = null;
+ 		}
+ 	}
+ }
+
++async function getExistingTarget(targetId) {
++	const response = await fetch(browserApiUrl + "/json/list");
++	if (!response.ok) {
++		throw new Error("Unable to list browser targets");
++	}
++	const targets = await response.json();
++	const target = targets.find(value => value.id === targetId && value.type === "page");
++	if (!target) {
++		throw new Error("Browser target not found: " + targetId);
++	}
++	return target;
++}
++
+ async function setupConsoleLogging({ Console }, { options, consoleMessages, debugMessages }) {
+ 	const CONSOLE_MESSAGE_ADDED_EVENT_TYPE = "messageAdded";
+ 	if (options.consoleMessagesFile) {
+@@ -366,7 +383,9 @@ async function setupScriptInjection({ Page }, { options }) {
+
+ async function getContextId({ Debugger, Page, Runtime }, { options, debugMessages }) {
+ 	const [contextId] = await Promise.all([
+-		loadPage({ Page, Runtime }, { options, debugMessages }),
++		options.browserTargetId && options.browserSkipNavigation
++			? loadCurrentPage({ Page, Runtime }, { options, debugMessages })
++			: loadPage({ Page, Runtime }, { options, debugMessages }),
+ 		options.browserDebug ? waitForDebuggerReady() : Promise.resolve()
+ 	]);
+ 	return contextId;
+@@ -386,6 +405,31 @@ async function getContextId({ Debugger, Page, Runtime }, { options, debugMessages }) {
+ 	}
+ }
+
++async function loadCurrentPage({ Page, Runtime }, { options, debugMessages }) {
++	await Runtime.enable();
++	await Page.enable();
++	try {
++		logData(["Using current page", options.url], { options, debugMessages });
++		const { frameTree } = await Page.getFrameTree();
++		const { executionContextId } = await Page.createIsolatedWorld({
++			frameId: frameTree.frame.id,
++			worldName: SINGLE_FILE_WORLD_NAME,
++			grantUniveralAccess: true
++		});
++		const { result } = await Runtime.evaluate({
++			expression: "typeof singlefile !== 'undefined'",
++			contextId: executionContextId
++		});
++		if (result.value !== true) {
++			throw new Error("SingleFile was not injected into the existing page");
++		}
++		return executionContextId;
++	} finally {
++		await Runtime.disable();
++		await Page.disable();
++	}
++}
++
+ async function loadPage({ Page, Runtime }, { options, debugMessages }) {
+ 	const LOAD_TIMEOUT_ERROR_MESSAGE = "Load timeout";
+ 	await Runtime.enable();

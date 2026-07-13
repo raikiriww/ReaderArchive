@@ -10,6 +10,7 @@ export function archiveTask(overrides: Partial<ArchiveTask> = {}): ArchiveTask {
     started_at: "2026-06-21T08:30:02Z",
     finished_at: "2026-06-21T08:30:08Z",
     current_step: null,
+    manual_actions: [],
     source_type: "manual",
     source_feed_id: null,
     source_title: null,

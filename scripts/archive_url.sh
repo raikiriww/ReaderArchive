@@ -21,9 +21,14 @@ docker compose exec -T -u abc archive-desktop \
   env DISPLAY=:1 HOME=/config \
   single-file "$url" "/config/Downloads/$output" \
   --browser-server="$remote_debugging_url" \
-  --http-header=Cache-Control=no-cache \
-  --http-header=Pragma=no-cache \
-  --browser-wait-delay=2000 \
+  --browser-wait-until=networkIdle \
+  --browser-wait-until-delay=0 \
+  --browser-wait-until-fallback=false \
+  --load-deferred-images=true \
+  --load-deferred-images-dispatch-scroll-event=true \
+  --load-deferred-images-max-idle-time=5000 \
+  --remove-unused-styles=false \
+  --remove-alternative-medias=false \
   --filename-conflict-action=overwrite
 
 echo "data/archive/$output"

@@ -6,8 +6,8 @@ from uuid import uuid4
 
 from pydantic import BaseModel, HttpUrl
 from pydantic import Field as PydanticField
-from sqlalchemy import Column, UniqueConstraint
-from sqlalchemy.dialects.postgresql import CITEXT
+from sqlalchemy import Column, ForeignKey, String, UniqueConstraint, text
+from sqlalchemy.dialects.postgresql import CITEXT, JSONB
 from sqlmodel import Field, SQLModel
 
 
@@ -64,6 +64,14 @@ class ArchiveTask(SQLModel, table=True):
     started_at: datetime | None = None
     finished_at: datetime | None = None
     current_step: str | None = None
+    manual_actions: list[dict[str, str]] = Field(
+        default_factory=list,
+        sa_column=Column(
+            JSONB,
+            nullable=False,
+            server_default=text("'[]'::jsonb"),
+        ),
+    )
     is_read: bool = Field(default=False, index=True)
     source_type: str = Field(default="manual", index=True)
     source_feed_id: str | None = Field(default=None, index=True)
@@ -72,6 +80,29 @@ class ArchiveTask(SQLModel, table=True):
     video_title: str | None = None
     custom_title: str | None = None
     created_by_id: str | None = Field(default=None, foreign_key="reader_users.id")
+    updated_at: datetime = Field(default_factory=utc_now)
+
+
+class ArchiveBrowserTabBinding(SQLModel, table=True):
+    __tablename__ = "reader_archive_browser_tabs"
+    __table_args__ = (UniqueConstraint("task_id", "target"),)
+
+    id: str = Field(default_factory=new_id, primary_key=True)
+    task_id: str = Field(
+        sa_column=Column(
+            String,
+            ForeignKey("reader_archive_tasks.id", ondelete="CASCADE"),
+            nullable=False,
+            index=True,
+        )
+    )
+    target: str = Field(index=True)
+    browser_target_id: str | None = Field(default=None, index=True)
+    original_url: str
+    last_url: str | None = None
+    owned_by_reader: bool = Field(default=True)
+    state: str = Field(default="available", index=True)
+    created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)
 
 
@@ -179,7 +210,7 @@ class AppSetting(SQLModel, table=True):
 class ArchiveTaskStatus(StrEnum):
     QUEUED = "queued"
     RUNNING = "running"
-    BROWSER_LOGIN_REQUIRED = "browser_login_required"
+    MANUAL_ACTION_REQUIRED = "manual_action_required"
     SUCCEEDED = "succeeded"
     FAILED = "failed"
 
@@ -187,6 +218,42 @@ class ArchiveTaskStatus(StrEnum):
 class ArchiveTaskSourceType(StrEnum):
     MANUAL = "manual"
     RSS = "rss"
+
+
+class ManualActionKind(StrEnum):
+    LOGIN = "login"
+    VERIFICATION = "verification"
+    CONFIRMATION = "confirmation"
+
+
+class ManualActionTarget(StrEnum):
+    PAGE = "page"
+    VIDEO = "video"
+
+
+class ManualActionResume(StrEnum):
+    RETRY_PAGE = "retry_page"
+    CONTINUE_VIDEO = "continue_video"
+
+
+class BrowserTabState(StrEnum):
+    AVAILABLE = "available"
+    NOT_OPENED = "not_opened"
+    MISSING = "missing"
+
+
+class ManualActionRead(BaseModel):
+    code: str
+    kind: ManualActionKind
+    target: ManualActionTarget
+    message: str
+    resume: ManualActionResume
+    rule_id: str
+    browser_tab_state: BrowserTabState = BrowserTabState.NOT_OPENED
+
+
+class ManualActionResumeRequest(BaseModel):
+    code: str = PydanticField(min_length=1, max_length=100)
 
 
 class ArchiveTaskCreate(BaseModel):
@@ -255,6 +322,7 @@ class ArchiveTaskRead(BaseModel):
     started_at: datetime | None = None
     finished_at: datetime | None = None
     current_step: str | None = None
+    manual_actions: list[ManualActionRead]
     source_type: ArchiveTaskSourceType = ArchiveTaskSourceType.MANUAL
     source_feed_id: str | None = None
     source_title: str | None = None

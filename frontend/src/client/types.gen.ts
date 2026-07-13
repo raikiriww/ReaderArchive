@@ -4,1548 +4,1811 @@
  * AppConfigRead
  */
 export type AppConfigRead = {
-    /**
-     * Desktop Url
-     */
-    desktop_url: string;
-    /**
-     * Archive Dir
-     */
-    archive_dir: string;
-    /**
-     * Poll Interval Ms
-     */
-    poll_interval_ms: number;
-    /**
-     * Rss Refresh Interval Seconds
-     */
-    rss_refresh_interval_seconds: number;
-    semantic_search?: SemanticHealthRead | null;
-};
-
-/**
- * SemanticHealthRead
- */
-export type SemanticHealthRead = {
-    enabled: boolean;
-    available: boolean;
-    status: string;
-    model_name: string;
-    embedding_dimensions: number;
-    text_version: string;
-    queued_count?: number;
-    indexed_count?: number;
-    failed_count?: number;
-    last_error?: string | null;
+  /**
+   * Desktop Url
+   */
+  desktop_url: string;
+  /**
+   * Archive Dir
+   */
+  archive_dir: string;
+  /**
+   * Poll Interval Ms
+   */
+  poll_interval_ms: number;
+  /**
+   * Rss Refresh Interval Seconds
+   */
+  rss_refresh_interval_seconds: number;
+  semantic_search?: SemanticHealthRead | null;
 };
 
 /**
  * AppConfigUpdate
  */
 export type AppConfigUpdate = {
-    /**
-     * Poll Interval Ms
-     */
-    poll_interval_ms?: number | null;
-    /**
-     * Rss Refresh Interval Seconds
-     */
-    rss_refresh_interval_seconds?: number | null;
-};
-
-/**
- * HealthRead
- */
-export type HealthRead = {
-    status: string;
-    semantic_search?: SemanticHealthRead | null;
+  /**
+   * Poll Interval Ms
+   */
+  poll_interval_ms?: number | null;
+  /**
+   * Rss Refresh Interval Seconds
+   */
+  rss_refresh_interval_seconds?: number | null;
 };
 
 /**
  * ArchiveTagRead
  */
 export type ArchiveTagRead = {
-    /**
-     * Name
-     */
-    name: string;
-    /**
-     * Task Count
-     */
-    task_count: number;
+  /**
+   * Name
+   */
+  name: string;
+  /**
+   * Task Count
+   */
+  task_count: number;
 };
 
 /**
  * ArchiveTaskCreate
  */
 export type ArchiveTaskCreate = {
-    /**
-     * Url
-     */
-    url: string;
+  /**
+   * Url
+   */
+  url: string;
 };
 
 /**
  * ArchiveTaskCreated
  */
 export type ArchiveTaskCreated = {
-    /**
-     * Task Id
-     */
-    task_id: string;
-    status: ArchiveTaskStatus;
-    /**
-     * Status Url
-     */
-    status_url: string;
+  /**
+   * Task Id
+   */
+  task_id: string;
+  status: ArchiveTaskStatus;
+  /**
+   * Status Url
+   */
+  status_url: string;
 };
 
 /**
  * ArchiveTaskFileRead
  */
 export type ArchiveTaskFileRead = {
-    /**
-     * File Name
-     */
-    file_name: string;
-    /**
-     * Display Name
-     */
-    display_name: string;
-    /**
-     * Tool
-     */
-    tool: string;
-    /**
-     * Source Type
-     */
-    source_type: string;
-    /**
-     * Size Bytes
-     */
-    size_bytes: number;
-    /**
-     * View Url
-     */
-    view_url: string;
-    /**
-     * Download Url
-     */
-    download_url: string;
+  /**
+   * File Name
+   */
+  file_name: string;
+  /**
+   * Display Name
+   */
+  display_name: string;
+  /**
+   * Tool
+   */
+  tool: string;
+  /**
+   * Source Type
+   */
+  source_type: string;
+  /**
+   * Size Bytes
+   */
+  size_bytes: number;
+  /**
+   * View Url
+   */
+  view_url: string;
+  /**
+   * Download Url
+   */
+  download_url: string;
 };
 
 /**
  * ArchiveTaskFileUpdate
  */
 export type ArchiveTaskFileUpdate = {
-    /**
-     * Display Name
-     */
-    display_name: string;
-};
-
-/**
- * ArchiveTaskRead
- */
-export type ArchiveTaskRead = {
-    /**
-     * Task Id
-     */
-    task_id: string;
-    /**
-     * Url
-     */
-    url: string;
-    status: ArchiveTaskStatus;
-    /**
-     * Is Read
-     */
-    is_read?: boolean;
-    /**
-     * Created At
-     */
-    created_at: string;
-    /**
-     * Started At
-     */
-    started_at?: string | null;
-    /**
-     * Finished At
-     */
-    finished_at?: string | null;
-    /**
-     * Current Step
-     */
-    current_step?: string | null;
-    source_type?: ArchiveTaskSourceType;
-    /**
-     * Source Feed Id
-     */
-    source_feed_id?: string | null;
-    /**
-     * Source Title
-     */
-    source_title?: string | null;
-    /**
-     * Entry Title
-     */
-    entry_title?: string | null;
-    /**
-     * Video Title
-     */
-    video_title?: string | null;
-    /**
-     * Custom Title
-     */
-    custom_title?: string | null;
-    /**
-     * Display Title
-     */
-    display_title: string;
-    /**
-     * Tags
-     */
-    tags?: Array<string>;
-    search_match?: ArchiveTaskSearchMatch | null;
-    result?: ArchiveTaskResult | null;
-    /**
-     * Error
-     */
-    error?: string | null;
+  /**
+   * Display Name
+   */
+  display_name: string;
 };
 
 /**
  * ArchiveTaskListRead
  */
 export type ArchiveTaskListRead = {
-    /**
-     * Items
-     */
-    items: Array<ArchiveTaskRead>;
-    /**
-     * Total
-     */
-    total: number;
-    /**
-     * Limit
-     */
-    limit: number;
-    /**
-     * Offset
-     */
-    offset?: number;
-    /**
-     * Has More
-     */
-    has_more: boolean;
+  /**
+   * Items
+   */
+  items: Array<ArchiveTaskRead>;
+  /**
+   * Total
+   */
+  total: number;
+  /**
+   * Limit
+   */
+  limit: number;
+  /**
+   * Offset
+   */
+  offset?: number;
+  /**
+   * Has More
+   */
+  has_more: boolean;
+};
+
+/**
+ * ArchiveTaskRead
+ */
+export type ArchiveTaskRead = {
+  /**
+   * Task Id
+   */
+  task_id: string;
+  /**
+   * Url
+   */
+  url: string;
+  status: ArchiveTaskStatus;
+  /**
+   * Is Read
+   */
+  is_read?: boolean;
+  /**
+   * Created At
+   */
+  created_at: string;
+  /**
+   * Started At
+   */
+  started_at?: string | null;
+  /**
+   * Finished At
+   */
+  finished_at?: string | null;
+  /**
+   * Current Step
+   */
+  current_step?: string | null;
+  /**
+   * Manual Actions
+   */
+  manual_actions: Array<ManualActionRead>;
+  source_type?: ArchiveTaskSourceType;
+  /**
+   * Source Feed Id
+   */
+  source_feed_id?: string | null;
+  /**
+   * Source Title
+   */
+  source_title?: string | null;
+  /**
+   * Entry Title
+   */
+  entry_title?: string | null;
+  /**
+   * Video Title
+   */
+  video_title?: string | null;
+  /**
+   * Custom Title
+   */
+  custom_title?: string | null;
+  /**
+   * Display Title
+   */
+  display_title: string;
+  /**
+   * Tags
+   */
+  tags?: Array<string>;
+  search_match?: ArchiveTaskSearchMatch | null;
+  result?: ArchiveTaskResult | null;
+  /**
+   * Error
+   */
+  error?: string | null;
 };
 
 /**
  * ArchiveTaskResult
  */
 export type ArchiveTaskResult = {
-    /**
-     * File Name
-     */
-    file_name?: string | null;
-    /**
-     * Download Url
-     */
-    download_url?: string | null;
-    /**
-     * View Url
-     */
-    view_url?: string | null;
-    /**
-     * Video File Name
-     */
-    video_file_name?: string | null;
-    /**
-     * Video Download Url
-     */
-    video_download_url?: string | null;
-    /**
-     * Video Error
-     */
-    video_error?: string | null;
-    /**
-     * Page Error
-     */
-    page_error?: string | null;
+  /**
+   * File Name
+   */
+  file_name?: string | null;
+  /**
+   * Download Url
+   */
+  download_url?: string | null;
+  /**
+   * View Url
+   */
+  view_url?: string | null;
+  /**
+   * Video File Name
+   */
+  video_file_name?: string | null;
+  /**
+   * Video Download Url
+   */
+  video_download_url?: string | null;
+  /**
+   * Video Error
+   */
+  video_error?: string | null;
+  /**
+   * Page Error
+   */
+  page_error?: string | null;
 };
 
 /**
  * ArchiveTaskSearchMatch
  */
 export type ArchiveTaskSearchMatch = {
-    /**
-     * Excerpt
-     */
-    excerpt: string;
-    /**
-     * Score
-     */
-    score: number;
+  /**
+   * Excerpt
+   */
+  excerpt: string;
+  /**
+   * Score
+   */
+  score: number;
 };
 
 /**
  * ArchiveTaskSourceType
  */
 export enum ArchiveTaskSourceType {
-    MANUAL = 'manual',
-    RSS = 'rss'
+  MANUAL = "manual",
+  RSS = "rss",
 }
 
 /**
  * ArchiveTaskStatus
  */
 export enum ArchiveTaskStatus {
-    QUEUED = 'queued',
-    RUNNING = 'running',
-    BROWSER_LOGIN_REQUIRED = 'browser_login_required',
-    SUCCEEDED = 'succeeded',
-    FAILED = 'failed'
+  QUEUED = "queued",
+  RUNNING = "running",
+  MANUAL_ACTION_REQUIRED = "manual_action_required",
+  SUCCEEDED = "succeeded",
+  FAILED = "failed",
 }
 
 /**
  * ArchiveTaskUpdate
  */
 export type ArchiveTaskUpdate = {
-    /**
-     * Custom Title
-     */
-    custom_title?: string | null;
-    /**
-     * Tags
-     */
-    tags?: Array<string> | null;
+  /**
+   * Custom Title
+   */
+  custom_title?: string | null;
+  /**
+   * Tags
+   */
+  tags?: Array<string> | null;
 };
 
 /**
  * AuthSessionRead
  */
 export type AuthSessionRead = {
-    user: UserRead;
-    /**
-     * Csrf Token
-     */
-    csrf_token?: string;
+  user: UserRead;
+  /**
+   * Csrf Token
+   */
+  csrf_token?: string;
 };
 
 /**
  * Body_login-login_access_token
  */
 export type BodyLoginLoginAccessToken = {
-    /**
-     * Grant Type
-     */
-    grant_type?: string | null;
-    /**
-     * Username
-     */
-    username: string;
-    /**
-     * Password
-     */
-    password: string;
-    /**
-     * Scope
-     */
-    scope?: string;
-    /**
-     * Client Id
-     */
-    client_id?: string | null;
-    /**
-     * Client Secret
-     */
-    client_secret?: string | null;
+  /**
+   * Grant Type
+   */
+  grant_type?: string | null;
+  /**
+   * Username
+   */
+  username: string;
+  /**
+   * Password
+   */
+  password: string;
+  /**
+   * Scope
+   */
+  scope?: string;
+  /**
+   * Client Id
+   */
+  client_id?: string | null;
+  /**
+   * Client Secret
+   */
+  client_secret?: string | null;
 };
+
+/**
+ * BrowserTabState
+ */
+export enum BrowserTabState {
+  AVAILABLE = "available",
+  NOT_OPENED = "not_opened",
+  MISSING = "missing",
+}
 
 /**
  * HTTPValidationError
  */
 export type HttpValidationError = {
-    /**
-     * Detail
-     */
-    detail?: Array<ValidationError>;
+  /**
+   * Detail
+   */
+  detail?: Array<ValidationError>;
+};
+
+/**
+ * HealthRead
+ */
+export type HealthRead = {
+  /**
+   * Status
+   */
+  status: string;
+  semantic_search?: SemanticHealthRead | null;
 };
 
 /**
  * LoginRequest
  */
 export type LoginRequest = {
-    /**
-     * Username
-     */
-    username: string;
-    /**
-     * Password
-     */
-    password: string;
+  /**
+   * Username
+   */
+  username: string;
+  /**
+   * Password
+   */
+  password: string;
 };
+
+/**
+ * ManualActionKind
+ */
+export enum ManualActionKind {
+  LOGIN = "login",
+  VERIFICATION = "verification",
+  CONFIRMATION = "confirmation",
+}
+
+/**
+ * ManualActionRead
+ */
+export type ManualActionRead = {
+  /**
+   * Code
+   */
+  code: string;
+  kind: ManualActionKind;
+  target: ManualActionTarget;
+  /**
+   * Message
+   */
+  message: string;
+  resume: ManualActionResume;
+  /**
+   * Rule Id
+   */
+  rule_id: string;
+  browser_tab_state?: BrowserTabState;
+};
+
+/**
+ * ManualActionResume
+ */
+export enum ManualActionResume {
+  RETRY_PAGE = "retry_page",
+  CONTINUE_VIDEO = "continue_video",
+}
+
+/**
+ * ManualActionResumeRequest
+ */
+export type ManualActionResumeRequest = {
+  /**
+   * Code
+   */
+  code: string;
+};
+
+/**
+ * ManualActionTarget
+ */
+export enum ManualActionTarget {
+  PAGE = "page",
+  VIDEO = "video",
+}
 
 /**
  * PasswordChange
  */
 export type PasswordChange = {
-    /**
-     * Current Password
-     */
-    current_password: string;
-    /**
-     * New Password
-     */
-    new_password: string;
+  /**
+   * Current Password
+   */
+  current_password: string;
+  /**
+   * New Password
+   */
+  new_password: string;
 };
 
 /**
  * RssFeedCreate
  */
 export type RssFeedCreate = {
-    /**
-     * Url
-     */
-    url: string;
-    /**
-     * Title
-     */
-    title?: string | null;
+  /**
+   * Url
+   */
+  url: string;
+  /**
+   * Title
+   */
+  title?: string | null;
 };
 
 /**
  * RssFeedRead
  */
 export type RssFeedRead = {
-    /**
-     * Feed Id
-     */
-    feed_id: string;
-    /**
-     * Url
-     */
-    url: string;
-    /**
-     * Title
-     */
-    title: string;
-    /**
-     * Enabled
-     */
-    enabled: boolean;
-    /**
-     * Created At
-     */
-    created_at: string;
-    /**
-     * Updated At
-     */
-    updated_at: string;
-    /**
-     * Last Checked At
-     */
-    last_checked_at?: string | null;
-    /**
-     * Last Error
-     */
-    last_error?: string | null;
+  /**
+   * Feed Id
+   */
+  feed_id: string;
+  /**
+   * Url
+   */
+  url: string;
+  /**
+   * Title
+   */
+  title: string;
+  /**
+   * Enabled
+   */
+  enabled: boolean;
+  /**
+   * Created At
+   */
+  created_at: string;
+  /**
+   * Updated At
+   */
+  updated_at: string;
+  /**
+   * Last Checked At
+   */
+  last_checked_at?: string | null;
+  /**
+   * Last Error
+   */
+  last_error?: string | null;
 };
 
 /**
  * RssFeedRefreshResult
  */
 export type RssFeedRefreshResult = {
-    feed: RssFeedRead;
-    /**
-     * Discovered Count
-     */
-    discovered_count: number;
-    /**
-     * Created Task Count
-     */
-    created_task_count: number;
+  feed: RssFeedRead;
+  /**
+   * Discovered Count
+   */
+  discovered_count: number;
+  /**
+   * Created Task Count
+   */
+  created_task_count: number;
 };
 
 /**
  * RssFeedUpdate
  */
 export type RssFeedUpdate = {
-    /**
-     * Title
-     */
-    title?: string | null;
-    /**
-     * Enabled
-     */
-    enabled?: boolean | null;
+  /**
+   * Title
+   */
+  title?: string | null;
+  /**
+   * Enabled
+   */
+  enabled?: boolean | null;
+};
+
+/**
+ * SemanticHealthRead
+ */
+export type SemanticHealthRead = {
+  /**
+   * Enabled
+   */
+  enabled: boolean;
+  /**
+   * Available
+   */
+  available: boolean;
+  /**
+   * Status
+   */
+  status: string;
+  /**
+   * Model Name
+   */
+  model_name: string;
+  /**
+   * Embedding Dimensions
+   */
+  embedding_dimensions: number;
+  /**
+   * Text Version
+   */
+  text_version: string;
+  /**
+   * Queued Count
+   */
+  queued_count?: number;
+  /**
+   * Indexed Count
+   */
+  indexed_count?: number;
+  /**
+   * Failed Count
+   */
+  failed_count?: number;
+  /**
+   * Last Error
+   */
+  last_error?: string | null;
 };
 
 /**
  * Token
  */
 export type Token = {
-    /**
-     * Access Token
-     */
-    access_token: string;
-    /**
-     * Token Type
-     */
-    token_type?: string;
-    user: UserRead;
-    /**
-     * Csrf Token
-     */
-    csrf_token?: string;
+  /**
+   * Access Token
+   */
+  access_token: string;
+  /**
+   * Token Type
+   */
+  token_type?: string;
+  user: UserRead;
+  /**
+   * Csrf Token
+   */
+  csrf_token?: string;
 };
 
 /**
  * UserCreate
  */
 export type UserCreate = {
-    /**
-     * Username
-     */
-    username: string;
-    /**
-     * Password
-     */
-    password: string;
-    /**
-     * Role
-     */
-    role?: string;
+  /**
+   * Username
+   */
+  username: string;
+  /**
+   * Password
+   */
+  password: string;
+  /**
+   * Role
+   */
+  role?: string;
 };
 
 /**
  * UserPasswordReset
  */
 export type UserPasswordReset = {
-    /**
-     * Password
-     */
-    password: string;
+  /**
+   * Password
+   */
+  password: string;
 };
 
 /**
  * UserRead
  */
 export type UserRead = {
-    /**
-     * User Id
-     */
-    user_id: string;
-    /**
-     * Username
-     */
-    username: string;
-    /**
-     * Role
-     */
-    role: string;
-    /**
-     * Enabled
-     */
-    enabled: boolean;
-    /**
-     * Created At
-     */
-    created_at: string;
-    /**
-     * Updated At
-     */
-    updated_at: string;
+  /**
+   * User Id
+   */
+  user_id: string;
+  /**
+   * Username
+   */
+  username: string;
+  /**
+   * Role
+   */
+  role: string;
+  /**
+   * Enabled
+   */
+  enabled: boolean;
+  /**
+   * Created At
+   */
+  created_at: string;
+  /**
+   * Updated At
+   */
+  updated_at: string;
 };
 
 /**
  * UserUpdate
  */
 export type UserUpdate = {
-    /**
-     * Enabled
-     */
-    enabled?: boolean | null;
-    /**
-     * Role
-     */
-    role?: string | null;
+  /**
+   * Enabled
+   */
+  enabled?: boolean | null;
+  /**
+   * Role
+   */
+  role?: string | null;
 };
 
 /**
  * ValidationError
  */
 export type ValidationError = {
-    /**
-     * Location
-     */
-    loc: Array<string | number>;
-    /**
-     * Message
-     */
-    msg: string;
-    /**
-     * Error Type
-     */
-    type: string;
-    /**
-     * Input
-     */
-    input?: unknown;
-    /**
-     * Context
-     */
-    ctx?: {
-        [key: string]: unknown;
-    };
+  /**
+   * Location
+   */
+  loc: Array<string | number>;
+  /**
+   * Message
+   */
+  msg: string;
+  /**
+   * Error Type
+   */
+  type: string;
+  /**
+   * Input
+   */
+  input?: unknown;
+  /**
+   * Context
+   */
+  ctx?: {
+    [key: string]: unknown;
+  };
 };
 
 export type LoginLoginAccessTokenData = {
-    body: BodyLoginLoginAccessToken;
-    path?: never;
-    query?: never;
-    url: '/api/v1/login/access-token';
+  body: BodyLoginLoginAccessToken;
+  path?: never;
+  query?: never;
+  url: "/api/v1/login/access-token";
 };
 
 export type LoginLoginAccessTokenErrors = {
-    /**
-     * Validation Error
-     */
-    422: HttpValidationError;
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
 };
 
-export type LoginLoginAccessTokenError = LoginLoginAccessTokenErrors[keyof LoginLoginAccessTokenErrors];
+export type LoginLoginAccessTokenError =
+  LoginLoginAccessTokenErrors[keyof LoginLoginAccessTokenErrors];
 
 export type LoginLoginAccessTokenResponses = {
-    /**
-     * Successful Response
-     */
-    200: Token;
+  /**
+   * Successful Response
+   */
+  200: Token;
 };
 
-export type LoginLoginAccessTokenResponse = LoginLoginAccessTokenResponses[keyof LoginLoginAccessTokenResponses];
+export type LoginLoginAccessTokenResponse =
+  LoginLoginAccessTokenResponses[keyof LoginLoginAccessTokenResponses];
 
 export type LoginTestTokenData = {
-    body?: never;
-    path?: never;
-    query?: never;
-    url: '/api/v1/login/test-token';
+  body?: never;
+  path?: never;
+  query?: never;
+  url: "/api/v1/login/test-token";
 };
 
 export type LoginTestTokenResponses = {
-    /**
-     * Successful Response
-     */
-    200: UserRead;
+  /**
+   * Successful Response
+   */
+  200: UserRead;
 };
 
-export type LoginTestTokenResponse = LoginTestTokenResponses[keyof LoginTestTokenResponses];
+export type LoginTestTokenResponse =
+  LoginTestTokenResponses[keyof LoginTestTokenResponses];
 
 export type LoginLoginJsonData = {
-    body: LoginRequest;
-    path?: never;
-    query?: never;
-    url: '/api/v1/auth/login';
+  body: LoginRequest;
+  path?: never;
+  query?: never;
+  url: "/api/v1/auth/login";
 };
 
 export type LoginLoginJsonErrors = {
-    /**
-     * Validation Error
-     */
-    422: HttpValidationError;
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
 };
 
-export type LoginLoginJsonError = LoginLoginJsonErrors[keyof LoginLoginJsonErrors];
+export type LoginLoginJsonError =
+  LoginLoginJsonErrors[keyof LoginLoginJsonErrors];
 
 export type LoginLoginJsonResponses = {
-    /**
-     * Successful Response
-     */
-    200: Token;
+  /**
+   * Successful Response
+   */
+  200: Token;
 };
 
-export type LoginLoginJsonResponse = LoginLoginJsonResponses[keyof LoginLoginJsonResponses];
+export type LoginLoginJsonResponse =
+  LoginLoginJsonResponses[keyof LoginLoginJsonResponses];
 
 export type LoginChangePasswordData = {
-    body: PasswordChange;
-    path?: never;
-    query?: never;
-    url: '/api/v1/auth/change-password';
+  body: PasswordChange;
+  path?: never;
+  query?: never;
+  url: "/api/v1/auth/change-password";
 };
 
 export type LoginChangePasswordErrors = {
-    /**
-     * Validation Error
-     */
-    422: HttpValidationError;
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
 };
 
-export type LoginChangePasswordError = LoginChangePasswordErrors[keyof LoginChangePasswordErrors];
+export type LoginChangePasswordError =
+  LoginChangePasswordErrors[keyof LoginChangePasswordErrors];
 
 export type LoginChangePasswordResponses = {
-    /**
-     * Successful Response
-     */
-    200: UserRead;
+  /**
+   * Successful Response
+   */
+  200: UserRead;
 };
 
-export type LoginChangePasswordResponse = LoginChangePasswordResponses[keyof LoginChangePasswordResponses];
+export type LoginChangePasswordResponse =
+  LoginChangePasswordResponses[keyof LoginChangePasswordResponses];
 
 export type HealthHealthData = {
-    body?: never;
-    path?: never;
-    query?: never;
-    url: '/api/v1/health';
+  body?: never;
+  path?: never;
+  query?: never;
+  url: "/api/v1/health";
 };
 
 export type HealthHealthResponses = {
-    /**
-     * Successful Response
-     */
-    200: HealthRead;
+  /**
+   * Successful Response
+   */
+  200: HealthRead;
 };
 
-export type HealthHealthResponse = HealthHealthResponses[keyof HealthHealthResponses];
+export type HealthHealthResponse =
+  HealthHealthResponses[keyof HealthHealthResponses];
 
 export type UsersListUsersData = {
-    body?: never;
-    path?: never;
-    query?: never;
-    url: '/api/v1/users';
+  body?: never;
+  path?: never;
+  query?: never;
+  url: "/api/v1/users";
 };
 
 export type UsersListUsersResponses = {
-    /**
-     * Response Users-List Users
-     * Successful Response
-     */
-    200: Array<UserRead>;
+  /**
+   * Response Users-List Users
+   * Successful Response
+   */
+  200: Array<UserRead>;
 };
 
-export type UsersListUsersResponse = UsersListUsersResponses[keyof UsersListUsersResponses];
+export type UsersListUsersResponse =
+  UsersListUsersResponses[keyof UsersListUsersResponses];
 
 export type UsersCreateUserData = {
-    body: UserCreate;
-    path?: never;
-    query?: never;
-    url: '/api/v1/users';
+  body: UserCreate;
+  path?: never;
+  query?: never;
+  url: "/api/v1/users";
 };
 
 export type UsersCreateUserErrors = {
-    /**
-     * Validation Error
-     */
-    422: HttpValidationError;
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
 };
 
-export type UsersCreateUserError = UsersCreateUserErrors[keyof UsersCreateUserErrors];
+export type UsersCreateUserError =
+  UsersCreateUserErrors[keyof UsersCreateUserErrors];
 
 export type UsersCreateUserResponses = {
-    /**
-     * Successful Response
-     */
-    201: UserRead;
+  /**
+   * Successful Response
+   */
+  201: UserRead;
 };
 
-export type UsersCreateUserResponse = UsersCreateUserResponses[keyof UsersCreateUserResponses];
+export type UsersCreateUserResponse =
+  UsersCreateUserResponses[keyof UsersCreateUserResponses];
 
 export type UsersDeleteUserData = {
-    body?: never;
-    path: {
-        /**
-         * User Id
-         */
-        user_id: string;
-    };
-    query?: never;
-    url: '/api/v1/users/{user_id}';
+  body?: never;
+  path: {
+    /**
+     * User Id
+     */
+    user_id: string;
+  };
+  query?: never;
+  url: "/api/v1/users/{user_id}";
 };
 
 export type UsersDeleteUserErrors = {
-    /**
-     * Validation Error
-     */
-    422: HttpValidationError;
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
 };
 
-export type UsersDeleteUserError = UsersDeleteUserErrors[keyof UsersDeleteUserErrors];
+export type UsersDeleteUserError =
+  UsersDeleteUserErrors[keyof UsersDeleteUserErrors];
 
 export type UsersDeleteUserResponses = {
-    /**
-     * Successful Response
-     */
-    204: void;
+  /**
+   * Successful Response
+   */
+  204: void;
 };
 
-export type UsersDeleteUserResponse = UsersDeleteUserResponses[keyof UsersDeleteUserResponses];
+export type UsersDeleteUserResponse =
+  UsersDeleteUserResponses[keyof UsersDeleteUserResponses];
 
 export type UsersUpdateUserData = {
-    body: UserUpdate;
-    path: {
-        /**
-         * User Id
-         */
-        user_id: string;
-    };
-    query?: never;
-    url: '/api/v1/users/{user_id}';
+  body: UserUpdate;
+  path: {
+    /**
+     * User Id
+     */
+    user_id: string;
+  };
+  query?: never;
+  url: "/api/v1/users/{user_id}";
 };
 
 export type UsersUpdateUserErrors = {
-    /**
-     * Validation Error
-     */
-    422: HttpValidationError;
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
 };
 
-export type UsersUpdateUserError = UsersUpdateUserErrors[keyof UsersUpdateUserErrors];
+export type UsersUpdateUserError =
+  UsersUpdateUserErrors[keyof UsersUpdateUserErrors];
 
 export type UsersUpdateUserResponses = {
-    /**
-     * Successful Response
-     */
-    200: UserRead;
+  /**
+   * Successful Response
+   */
+  200: UserRead;
 };
 
-export type UsersUpdateUserResponse = UsersUpdateUserResponses[keyof UsersUpdateUserResponses];
+export type UsersUpdateUserResponse =
+  UsersUpdateUserResponses[keyof UsersUpdateUserResponses];
 
 export type UsersResetUserPasswordData = {
-    body: UserPasswordReset;
-    path: {
-        /**
-         * User Id
-         */
-        user_id: string;
-    };
-    query?: never;
-    url: '/api/v1/users/{user_id}/reset-password';
+  body: UserPasswordReset;
+  path: {
+    /**
+     * User Id
+     */
+    user_id: string;
+  };
+  query?: never;
+  url: "/api/v1/users/{user_id}/reset-password";
 };
 
 export type UsersResetUserPasswordErrors = {
-    /**
-     * Validation Error
-     */
-    422: HttpValidationError;
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
 };
 
-export type UsersResetUserPasswordError = UsersResetUserPasswordErrors[keyof UsersResetUserPasswordErrors];
+export type UsersResetUserPasswordError =
+  UsersResetUserPasswordErrors[keyof UsersResetUserPasswordErrors];
 
 export type UsersResetUserPasswordResponses = {
-    /**
-     * Successful Response
-     */
-    200: UserRead;
+  /**
+   * Successful Response
+   */
+  200: UserRead;
 };
 
-export type UsersResetUserPasswordResponse = UsersResetUserPasswordResponses[keyof UsersResetUserPasswordResponses];
+export type UsersResetUserPasswordResponse =
+  UsersResetUserPasswordResponses[keyof UsersResetUserPasswordResponses];
 
 export type ConfigReadAppConfigData = {
-    body?: never;
-    path?: never;
-    query?: never;
-    url: '/api/v1/app-config';
+  body?: never;
+  path?: never;
+  query?: never;
+  url: "/api/v1/app-config";
 };
 
 export type ConfigReadAppConfigResponses = {
-    /**
-     * Successful Response
-     */
-    200: AppConfigRead;
+  /**
+   * Successful Response
+   */
+  200: AppConfigRead;
 };
 
-export type ConfigReadAppConfigResponse = ConfigReadAppConfigResponses[keyof ConfigReadAppConfigResponses];
+export type ConfigReadAppConfigResponse =
+  ConfigReadAppConfigResponses[keyof ConfigReadAppConfigResponses];
 
 export type ConfigUpdateAppConfigData = {
-    body: AppConfigUpdate;
-    path?: never;
-    query?: never;
-    url: '/api/v1/app-config';
+  body: AppConfigUpdate;
+  path?: never;
+  query?: never;
+  url: "/api/v1/app-config";
 };
 
 export type ConfigUpdateAppConfigErrors = {
-    /**
-     * Validation Error
-     */
-    422: HttpValidationError;
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
 };
 
-export type ConfigUpdateAppConfigError = ConfigUpdateAppConfigErrors[keyof ConfigUpdateAppConfigErrors];
+export type ConfigUpdateAppConfigError =
+  ConfigUpdateAppConfigErrors[keyof ConfigUpdateAppConfigErrors];
 
 export type ConfigUpdateAppConfigResponses = {
-    /**
-     * Successful Response
-     */
-    200: AppConfigRead;
+  /**
+   * Successful Response
+   */
+  200: AppConfigRead;
 };
 
-export type ConfigUpdateAppConfigResponse = ConfigUpdateAppConfigResponses[keyof ConfigUpdateAppConfigResponses];
+export type ConfigUpdateAppConfigResponse =
+  ConfigUpdateAppConfigResponses[keyof ConfigUpdateAppConfigResponses];
 
 export type ArchiveTasksListArchiveTasksData = {
-    body?: never;
-    path?: never;
-    query?: {
-        /**
-         * Limit
-         */
-        limit?: number;
-        /**
-         * Offset
-         */
-        offset?: number;
-        /**
-         * Include Read
-         */
-        include_read?: boolean;
-        /**
-         * Tag
-         */
-        tag?: string | null;
-        /**
-         * Tags
-         */
-        tags?: Array<string> | null;
-        /**
-         * Q
-         */
-        q?: string | null;
-        /**
-         * Title
-         */
-        title?: string | null;
-        /**
-         * Status
-         */
-        status?: ('running' | 'failed') | null;
-    };
-    url: '/api/v1/archive-tasks';
+  body?: never;
+  path?: never;
+  query?: {
+    /**
+     * Limit
+     */
+    limit?: number;
+    /**
+     * Offset
+     */
+    offset?: number;
+    /**
+     * Include Read
+     */
+    include_read?: boolean;
+    /**
+     * Tag
+     */
+    tag?: string | null;
+    /**
+     * Tags
+     */
+    tags?: Array<string> | null;
+    /**
+     * Q
+     */
+    q?: string | null;
+    /**
+     * Title
+     */
+    title?: string | null;
+    /**
+     * Status
+     */
+    status?: ("running" | "failed") | null;
+  };
+  url: "/api/v1/archive-tasks";
 };
 
 export type ArchiveTasksListArchiveTasksErrors = {
-    /**
-     * Validation Error
-     */
-    422: HttpValidationError;
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
 };
 
-export type ArchiveTasksListArchiveTasksError = ArchiveTasksListArchiveTasksErrors[keyof ArchiveTasksListArchiveTasksErrors];
+export type ArchiveTasksListArchiveTasksError =
+  ArchiveTasksListArchiveTasksErrors[keyof ArchiveTasksListArchiveTasksErrors];
 
 export type ArchiveTasksListArchiveTasksResponses = {
-    /**
-     * Response Archive-Tasks-List Archive Tasks
-     * Successful Response
-     */
-    200: ArchiveTaskListRead;
+  /**
+   * Successful Response
+   */
+  200: ArchiveTaskListRead;
 };
 
-export type ArchiveTasksListArchiveTasksResponse = ArchiveTasksListArchiveTasksResponses[keyof ArchiveTasksListArchiveTasksResponses];
+export type ArchiveTasksListArchiveTasksResponse =
+  ArchiveTasksListArchiveTasksResponses[keyof ArchiveTasksListArchiveTasksResponses];
 
 export type ArchiveTasksCreateArchiveTaskData = {
-    body: ArchiveTaskCreate;
-    path?: never;
-    query?: never;
-    url: '/api/v1/archive-tasks';
+  body: ArchiveTaskCreate;
+  path?: never;
+  query?: never;
+  url: "/api/v1/archive-tasks";
 };
 
 export type ArchiveTasksCreateArchiveTaskErrors = {
-    /**
-     * Validation Error
-     */
-    422: HttpValidationError;
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
 };
 
-export type ArchiveTasksCreateArchiveTaskError = ArchiveTasksCreateArchiveTaskErrors[keyof ArchiveTasksCreateArchiveTaskErrors];
+export type ArchiveTasksCreateArchiveTaskError =
+  ArchiveTasksCreateArchiveTaskErrors[keyof ArchiveTasksCreateArchiveTaskErrors];
 
 export type ArchiveTasksCreateArchiveTaskResponses = {
-    /**
-     * Successful Response
-     */
-    202: ArchiveTaskCreated;
+  /**
+   * Successful Response
+   */
+  202: ArchiveTaskCreated;
 };
 
-export type ArchiveTasksCreateArchiveTaskResponse = ArchiveTasksCreateArchiveTaskResponses[keyof ArchiveTasksCreateArchiveTaskResponses];
+export type ArchiveTasksCreateArchiveTaskResponse =
+  ArchiveTasksCreateArchiveTaskResponses[keyof ArchiveTasksCreateArchiveTaskResponses];
 
 export type ArchiveTasksListArchiveTagsData = {
-    body?: never;
-    path?: never;
-    query?: never;
-    url: '/api/v1/archive-tags';
+  body?: never;
+  path?: never;
+  query?: never;
+  url: "/api/v1/archive-tags";
 };
 
 export type ArchiveTasksListArchiveTagsResponses = {
-    /**
-     * Response Archive-Tasks-List Archive Tags
-     * Successful Response
-     */
-    200: Array<ArchiveTagRead>;
+  /**
+   * Response Archive-Tasks-List Archive Tags
+   * Successful Response
+   */
+  200: Array<ArchiveTagRead>;
 };
 
-export type ArchiveTasksListArchiveTagsResponse = ArchiveTasksListArchiveTagsResponses[keyof ArchiveTasksListArchiveTagsResponses];
+export type ArchiveTasksListArchiveTagsResponse =
+  ArchiveTasksListArchiveTagsResponses[keyof ArchiveTasksListArchiveTagsResponses];
 
 export type ArchiveTasksDeleteArchiveTaskData = {
-    body?: never;
-    path: {
-        /**
-         * Task Id
-         */
-        task_id: string;
-    };
-    query?: never;
-    url: '/api/v1/archive-tasks/{task_id}';
+  body?: never;
+  path: {
+    /**
+     * Task Id
+     */
+    task_id: string;
+  };
+  query?: never;
+  url: "/api/v1/archive-tasks/{task_id}";
 };
 
 export type ArchiveTasksDeleteArchiveTaskErrors = {
-    /**
-     * Validation Error
-     */
-    422: HttpValidationError;
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
 };
 
-export type ArchiveTasksDeleteArchiveTaskError = ArchiveTasksDeleteArchiveTaskErrors[keyof ArchiveTasksDeleteArchiveTaskErrors];
+export type ArchiveTasksDeleteArchiveTaskError =
+  ArchiveTasksDeleteArchiveTaskErrors[keyof ArchiveTasksDeleteArchiveTaskErrors];
 
 export type ArchiveTasksDeleteArchiveTaskResponses = {
-    /**
-     * Successful Response
-     */
-    204: void;
+  /**
+   * Successful Response
+   */
+  204: void;
 };
 
-export type ArchiveTasksDeleteArchiveTaskResponse = ArchiveTasksDeleteArchiveTaskResponses[keyof ArchiveTasksDeleteArchiveTaskResponses];
+export type ArchiveTasksDeleteArchiveTaskResponse =
+  ArchiveTasksDeleteArchiveTaskResponses[keyof ArchiveTasksDeleteArchiveTaskResponses];
 
 export type ArchiveTasksReadArchiveTaskData = {
-    body?: never;
-    path: {
-        /**
-         * Task Id
-         */
-        task_id: string;
-    };
-    query?: never;
-    url: '/api/v1/archive-tasks/{task_id}';
+  body?: never;
+  path: {
+    /**
+     * Task Id
+     */
+    task_id: string;
+  };
+  query?: never;
+  url: "/api/v1/archive-tasks/{task_id}";
 };
 
 export type ArchiveTasksReadArchiveTaskErrors = {
-    /**
-     * Validation Error
-     */
-    422: HttpValidationError;
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
 };
 
-export type ArchiveTasksReadArchiveTaskError = ArchiveTasksReadArchiveTaskErrors[keyof ArchiveTasksReadArchiveTaskErrors];
+export type ArchiveTasksReadArchiveTaskError =
+  ArchiveTasksReadArchiveTaskErrors[keyof ArchiveTasksReadArchiveTaskErrors];
 
 export type ArchiveTasksReadArchiveTaskResponses = {
-    /**
-     * Successful Response
-     */
-    200: ArchiveTaskRead;
+  /**
+   * Successful Response
+   */
+  200: ArchiveTaskRead;
 };
 
-export type ArchiveTasksReadArchiveTaskResponse = ArchiveTasksReadArchiveTaskResponses[keyof ArchiveTasksReadArchiveTaskResponses];
+export type ArchiveTasksReadArchiveTaskResponse =
+  ArchiveTasksReadArchiveTaskResponses[keyof ArchiveTasksReadArchiveTaskResponses];
 
 export type ArchiveTasksUpdateArchiveTaskData = {
-    body: ArchiveTaskUpdate;
-    path: {
-        /**
-         * Task Id
-         */
-        task_id: string;
-    };
-    query?: never;
-    url: '/api/v1/archive-tasks/{task_id}';
+  body: ArchiveTaskUpdate;
+  path: {
+    /**
+     * Task Id
+     */
+    task_id: string;
+  };
+  query?: never;
+  url: "/api/v1/archive-tasks/{task_id}";
 };
 
 export type ArchiveTasksUpdateArchiveTaskErrors = {
-    /**
-     * Validation Error
-     */
-    422: HttpValidationError;
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
 };
 
-export type ArchiveTasksUpdateArchiveTaskError = ArchiveTasksUpdateArchiveTaskErrors[keyof ArchiveTasksUpdateArchiveTaskErrors];
+export type ArchiveTasksUpdateArchiveTaskError =
+  ArchiveTasksUpdateArchiveTaskErrors[keyof ArchiveTasksUpdateArchiveTaskErrors];
 
 export type ArchiveTasksUpdateArchiveTaskResponses = {
-    /**
-     * Successful Response
-     */
-    200: ArchiveTaskRead;
+  /**
+   * Successful Response
+   */
+  200: ArchiveTaskRead;
 };
 
-export type ArchiveTasksUpdateArchiveTaskResponse = ArchiveTasksUpdateArchiveTaskResponses[keyof ArchiveTasksUpdateArchiveTaskResponses];
+export type ArchiveTasksUpdateArchiveTaskResponse =
+  ArchiveTasksUpdateArchiveTaskResponses[keyof ArchiveTasksUpdateArchiveTaskResponses];
 
 export type ArchiveTasksListArchiveTaskFilesData = {
-    body?: never;
-    path: {
-        /**
-         * Task Id
-         */
-        task_id: string;
-    };
-    query?: never;
-    url: '/api/v1/archive-tasks/{task_id}/file-list';
+  body?: never;
+  path: {
+    /**
+     * Task Id
+     */
+    task_id: string;
+  };
+  query?: never;
+  url: "/api/v1/archive-tasks/{task_id}/file-list";
 };
 
 export type ArchiveTasksListArchiveTaskFilesErrors = {
-    /**
-     * Validation Error
-     */
-    422: HttpValidationError;
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
 };
 
-export type ArchiveTasksListArchiveTaskFilesError = ArchiveTasksListArchiveTaskFilesErrors[keyof ArchiveTasksListArchiveTaskFilesErrors];
+export type ArchiveTasksListArchiveTaskFilesError =
+  ArchiveTasksListArchiveTaskFilesErrors[keyof ArchiveTasksListArchiveTaskFilesErrors];
 
 export type ArchiveTasksListArchiveTaskFilesResponses = {
-    /**
-     * Response Archive-Tasks-List Archive Task Files
-     * Successful Response
-     */
-    200: Array<ArchiveTaskFileRead>;
+  /**
+   * Response Archive-Tasks-List Archive Task Files
+   * Successful Response
+   */
+  200: Array<ArchiveTaskFileRead>;
 };
 
-export type ArchiveTasksListArchiveTaskFilesResponse = ArchiveTasksListArchiveTaskFilesResponses[keyof ArchiveTasksListArchiveTaskFilesResponses];
+export type ArchiveTasksListArchiveTaskFilesResponse =
+  ArchiveTasksListArchiveTaskFilesResponses[keyof ArchiveTasksListArchiveTaskFilesResponses];
 
 export type ArchiveTasksUploadArchiveTaskFileData = {
-    body?: never;
-    path: {
-        /**
-         * Task Id
-         */
-        task_id: string;
-    };
-    query: {
-        /**
-         * File Name
-         */
-        file_name: string;
-    };
-    url: '/api/v1/archive-tasks/{task_id}/files';
+  body?: never;
+  path: {
+    /**
+     * Task Id
+     */
+    task_id: string;
+  };
+  query: {
+    /**
+     * File Name
+     */
+    file_name: string;
+  };
+  url: "/api/v1/archive-tasks/{task_id}/files";
 };
 
 export type ArchiveTasksUploadArchiveTaskFileErrors = {
-    /**
-     * Validation Error
-     */
-    422: HttpValidationError;
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
 };
 
-export type ArchiveTasksUploadArchiveTaskFileError = ArchiveTasksUploadArchiveTaskFileErrors[keyof ArchiveTasksUploadArchiveTaskFileErrors];
+export type ArchiveTasksUploadArchiveTaskFileError =
+  ArchiveTasksUploadArchiveTaskFileErrors[keyof ArchiveTasksUploadArchiveTaskFileErrors];
 
 export type ArchiveTasksUploadArchiveTaskFileResponses = {
-    /**
-     * Successful Response
-     */
-    201: ArchiveTaskFileRead;
+  /**
+   * Successful Response
+   */
+  201: ArchiveTaskFileRead;
 };
 
-export type ArchiveTasksUploadArchiveTaskFileResponse = ArchiveTasksUploadArchiveTaskFileResponses[keyof ArchiveTasksUploadArchiveTaskFileResponses];
+export type ArchiveTasksUploadArchiveTaskFileResponse =
+  ArchiveTasksUploadArchiveTaskFileResponses[keyof ArchiveTasksUploadArchiveTaskFileResponses];
 
 export type ArchiveTasksDeleteArchiveTaskFileData = {
-    body?: never;
-    path: {
-        /**
-         * Task Id
-         */
-        task_id: string;
-        /**
-         * File Name
-         */
-        file_name: string;
-    };
-    query?: never;
-    url: '/api/v1/archive-tasks/{task_id}/files/{file_name}';
+  body?: never;
+  path: {
+    /**
+     * Task Id
+     */
+    task_id: string;
+    /**
+     * File Name
+     */
+    file_name: string;
+  };
+  query?: never;
+  url: "/api/v1/archive-tasks/{task_id}/files/{file_name}";
 };
 
 export type ArchiveTasksDeleteArchiveTaskFileErrors = {
-    /**
-     * Validation Error
-     */
-    422: HttpValidationError;
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
 };
 
-export type ArchiveTasksDeleteArchiveTaskFileError = ArchiveTasksDeleteArchiveTaskFileErrors[keyof ArchiveTasksDeleteArchiveTaskFileErrors];
+export type ArchiveTasksDeleteArchiveTaskFileError =
+  ArchiveTasksDeleteArchiveTaskFileErrors[keyof ArchiveTasksDeleteArchiveTaskFileErrors];
 
 export type ArchiveTasksDeleteArchiveTaskFileResponses = {
-    /**
-     * Successful Response
-     */
-    204: void;
+  /**
+   * Successful Response
+   */
+  204: void;
 };
 
-export type ArchiveTasksDeleteArchiveTaskFileResponse = ArchiveTasksDeleteArchiveTaskFileResponses[keyof ArchiveTasksDeleteArchiveTaskFileResponses];
+export type ArchiveTasksDeleteArchiveTaskFileResponse =
+  ArchiveTasksDeleteArchiveTaskFileResponses[keyof ArchiveTasksDeleteArchiveTaskFileResponses];
 
 export type ArchiveTasksUpdateArchiveTaskFileData = {
-    body: ArchiveTaskFileUpdate;
-    path: {
-        /**
-         * Task Id
-         */
-        task_id: string;
-        /**
-         * File Name
-         */
-        file_name: string;
-    };
-    query?: never;
-    url: '/api/v1/archive-tasks/{task_id}/files/{file_name}';
+  body: ArchiveTaskFileUpdate;
+  path: {
+    /**
+     * Task Id
+     */
+    task_id: string;
+    /**
+     * File Name
+     */
+    file_name: string;
+  };
+  query?: never;
+  url: "/api/v1/archive-tasks/{task_id}/files/{file_name}";
 };
 
 export type ArchiveTasksUpdateArchiveTaskFileErrors = {
-    /**
-     * Validation Error
-     */
-    422: HttpValidationError;
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
 };
 
-export type ArchiveTasksUpdateArchiveTaskFileError = ArchiveTasksUpdateArchiveTaskFileErrors[keyof ArchiveTasksUpdateArchiveTaskFileErrors];
+export type ArchiveTasksUpdateArchiveTaskFileError =
+  ArchiveTasksUpdateArchiveTaskFileErrors[keyof ArchiveTasksUpdateArchiveTaskFileErrors];
 
 export type ArchiveTasksUpdateArchiveTaskFileResponses = {
-    /**
-     * Successful Response
-     */
-    200: ArchiveTaskFileRead;
+  /**
+   * Successful Response
+   */
+  200: ArchiveTaskFileRead;
 };
 
-export type ArchiveTasksUpdateArchiveTaskFileResponse = ArchiveTasksUpdateArchiveTaskFileResponses[keyof ArchiveTasksUpdateArchiveTaskFileResponses];
+export type ArchiveTasksUpdateArchiveTaskFileResponse =
+  ArchiveTasksUpdateArchiveTaskFileResponses[keyof ArchiveTasksUpdateArchiveTaskFileResponses];
 
 export type ArchiveTasksMarkArchiveTaskReadData = {
-    body?: never;
-    path: {
-        /**
-         * Task Id
-         */
-        task_id: string;
-    };
-    query?: never;
-    url: '/api/v1/archive-tasks/{task_id}/mark-read';
+  body?: never;
+  path: {
+    /**
+     * Task Id
+     */
+    task_id: string;
+  };
+  query?: never;
+  url: "/api/v1/archive-tasks/{task_id}/mark-read";
 };
 
 export type ArchiveTasksMarkArchiveTaskReadErrors = {
-    /**
-     * Validation Error
-     */
-    422: HttpValidationError;
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
 };
 
-export type ArchiveTasksMarkArchiveTaskReadError = ArchiveTasksMarkArchiveTaskReadErrors[keyof ArchiveTasksMarkArchiveTaskReadErrors];
+export type ArchiveTasksMarkArchiveTaskReadError =
+  ArchiveTasksMarkArchiveTaskReadErrors[keyof ArchiveTasksMarkArchiveTaskReadErrors];
 
 export type ArchiveTasksMarkArchiveTaskReadResponses = {
-    /**
-     * Successful Response
-     */
-    200: ArchiveTaskRead;
+  /**
+   * Successful Response
+   */
+  200: ArchiveTaskRead;
 };
 
-export type ArchiveTasksMarkArchiveTaskReadResponse = ArchiveTasksMarkArchiveTaskReadResponses[keyof ArchiveTasksMarkArchiveTaskReadResponses];
+export type ArchiveTasksMarkArchiveTaskReadResponse =
+  ArchiveTasksMarkArchiveTaskReadResponses[keyof ArchiveTasksMarkArchiveTaskReadResponses];
+
+export type ArchiveTasksRearchiveTaskData = {
+  body?: never;
+  path: {
+    /**
+     * Task Id
+     */
+    task_id: string;
+  };
+  query?: never;
+  url: "/api/v1/archive-tasks/{task_id}/rearchive";
+};
+
+export type ArchiveTasksRearchiveTaskErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type ArchiveTasksRearchiveTaskError =
+  ArchiveTasksRearchiveTaskErrors[keyof ArchiveTasksRearchiveTaskErrors];
+
+export type ArchiveTasksRearchiveTaskResponses = {
+  /**
+   * Successful Response
+   */
+  202: ArchiveTaskRead;
+};
+
+export type ArchiveTasksRearchiveTaskResponse =
+  ArchiveTasksRearchiveTaskResponses[keyof ArchiveTasksRearchiveTaskResponses];
+
+export type ArchiveTasksResumeManualActionData = {
+  body: ManualActionResumeRequest;
+  path: {
+    /**
+     * Task Id
+     */
+    task_id: string;
+  };
+  query?: never;
+  url: "/api/v1/archive-tasks/{task_id}/resume-manual-action";
+};
+
+export type ArchiveTasksResumeManualActionErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type ArchiveTasksResumeManualActionError =
+  ArchiveTasksResumeManualActionErrors[keyof ArchiveTasksResumeManualActionErrors];
+
+export type ArchiveTasksResumeManualActionResponses = {
+  /**
+   * Successful Response
+   */
+  202: ArchiveTaskRead;
+};
+
+export type ArchiveTasksResumeManualActionResponse =
+  ArchiveTasksResumeManualActionResponses[keyof ArchiveTasksResumeManualActionResponses];
 
 export type ArchiveTasksContinueArchiveVideoData = {
-    body?: never;
-    path: {
-        /**
-         * Task Id
-         */
-        task_id: string;
-    };
-    query?: never;
-    url: '/api/v1/archive-tasks/{task_id}/continue-video';
+  body?: never;
+  path: {
+    /**
+     * Task Id
+     */
+    task_id: string;
+  };
+  query?: never;
+  url: "/api/v1/archive-tasks/{task_id}/continue-video";
 };
 
 export type ArchiveTasksContinueArchiveVideoErrors = {
-    /**
-     * Validation Error
-     */
-    422: HttpValidationError;
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
 };
 
-export type ArchiveTasksContinueArchiveVideoError = ArchiveTasksContinueArchiveVideoErrors[keyof ArchiveTasksContinueArchiveVideoErrors];
+export type ArchiveTasksContinueArchiveVideoError =
+  ArchiveTasksContinueArchiveVideoErrors[keyof ArchiveTasksContinueArchiveVideoErrors];
 
 export type ArchiveTasksContinueArchiveVideoResponses = {
-    /**
-     * Successful Response
-     */
-    202: ArchiveTaskRead;
+  /**
+   * Successful Response
+   */
+  202: ArchiveTaskRead;
 };
 
-export type ArchiveTasksContinueArchiveVideoResponse = ArchiveTasksContinueArchiveVideoResponses[keyof ArchiveTasksContinueArchiveVideoResponses];
+export type ArchiveTasksContinueArchiveVideoResponse =
+  ArchiveTasksContinueArchiveVideoResponses[keyof ArchiveTasksContinueArchiveVideoResponses];
 
 export type ArchiveTasksOpenArchiveTaskInBrowserData = {
-    body?: never;
-    path: {
-        /**
-         * Task Id
-         */
-        task_id: string;
-    };
-    query?: never;
-    url: '/api/v1/archive-tasks/{task_id}/open-browser';
+  body?: never;
+  path: {
+    /**
+     * Task Id
+     */
+    task_id: string;
+  };
+  query?: never;
+  url: "/api/v1/archive-tasks/{task_id}/open-browser";
 };
 
 export type ArchiveTasksOpenArchiveTaskInBrowserErrors = {
-    /**
-     * Validation Error
-     */
-    422: HttpValidationError;
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
 };
 
-export type ArchiveTasksOpenArchiveTaskInBrowserError = ArchiveTasksOpenArchiveTaskInBrowserErrors[keyof ArchiveTasksOpenArchiveTaskInBrowserErrors];
+export type ArchiveTasksOpenArchiveTaskInBrowserError =
+  ArchiveTasksOpenArchiveTaskInBrowserErrors[keyof ArchiveTasksOpenArchiveTaskInBrowserErrors];
 
 export type ArchiveTasksOpenArchiveTaskInBrowserResponses = {
-    /**
-     * Response Archive-Tasks-Open Archive Task In Browser
-     * Successful Response
-     */
-    202: {
-        [key: string]: string;
-    };
+  /**
+   * Response Archive-Tasks-Open Archive Task In Browser
+   * Successful Response
+   */
+  202: {
+    [key: string]: string;
+  };
 };
 
-export type ArchiveTasksOpenArchiveTaskInBrowserResponse = ArchiveTasksOpenArchiveTaskInBrowserResponses[keyof ArchiveTasksOpenArchiveTaskInBrowserResponses];
+export type ArchiveTasksOpenArchiveTaskInBrowserResponse =
+  ArchiveTasksOpenArchiveTaskInBrowserResponses[keyof ArchiveTasksOpenArchiveTaskInBrowserResponses];
+
+export type ArchiveTasksOpenManualActionInBrowserData = {
+  body?: never;
+  path: {
+    /**
+     * Task Id
+     */
+    task_id: string;
+    /**
+     * Action Code
+     */
+    action_code: string;
+  };
+  query?: never;
+  url: "/api/v1/archive-tasks/{task_id}/manual-actions/{action_code}/open-browser";
+};
+
+export type ArchiveTasksOpenManualActionInBrowserErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type ArchiveTasksOpenManualActionInBrowserError =
+  ArchiveTasksOpenManualActionInBrowserErrors[keyof ArchiveTasksOpenManualActionInBrowserErrors];
+
+export type ArchiveTasksOpenManualActionInBrowserResponses = {
+  /**
+   * Response Archive-Tasks-Open Manual Action In Browser
+   * Successful Response
+   */
+  202: {
+    [key: string]: string;
+  };
+};
+
+export type ArchiveTasksOpenManualActionInBrowserResponse =
+  ArchiveTasksOpenManualActionInBrowserResponses[keyof ArchiveTasksOpenManualActionInBrowserResponses];
 
 export type ArchiveTasksDownloadArchiveResultData = {
-    body?: never;
-    path: {
-        /**
-         * Task Id
-         */
-        task_id: string;
-    };
-    query?: never;
-    url: '/api/v1/archive-tasks/{task_id}/result';
+  body?: never;
+  path: {
+    /**
+     * Task Id
+     */
+    task_id: string;
+  };
+  query?: never;
+  url: "/api/v1/archive-tasks/{task_id}/result";
 };
 
 export type ArchiveTasksDownloadArchiveResultErrors = {
-    /**
-     * Validation Error
-     */
-    422: HttpValidationError;
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
 };
 
-export type ArchiveTasksDownloadArchiveResultError = ArchiveTasksDownloadArchiveResultErrors[keyof ArchiveTasksDownloadArchiveResultErrors];
+export type ArchiveTasksDownloadArchiveResultError =
+  ArchiveTasksDownloadArchiveResultErrors[keyof ArchiveTasksDownloadArchiveResultErrors];
 
 export type ArchiveTasksDownloadArchiveResultResponses = {
-    /**
-     * Successful Response
-     */
-    200: unknown;
+  /**
+   * Successful Response
+   */
+  200: unknown;
 };
 
 export type ArchiveTasksViewArchiveResultData = {
-    body?: never;
-    path: {
-        /**
-         * Task Id
-         */
-        task_id: string;
-    };
-    query?: never;
-    url: '/api/v1/archive-tasks/{task_id}/result/view';
+  body?: never;
+  path: {
+    /**
+     * Task Id
+     */
+    task_id: string;
+  };
+  query?: never;
+  url: "/api/v1/archive-tasks/{task_id}/result/view";
 };
 
 export type ArchiveTasksViewArchiveResultErrors = {
-    /**
-     * Validation Error
-     */
-    422: HttpValidationError;
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
 };
 
-export type ArchiveTasksViewArchiveResultError = ArchiveTasksViewArchiveResultErrors[keyof ArchiveTasksViewArchiveResultErrors];
+export type ArchiveTasksViewArchiveResultError =
+  ArchiveTasksViewArchiveResultErrors[keyof ArchiveTasksViewArchiveResultErrors];
 
 export type ArchiveTasksViewArchiveResultResponses = {
-    /**
-     * Successful Response
-     */
-    200: unknown;
+  /**
+   * Successful Response
+   */
+  200: unknown;
 };
 
 export type ArchiveTasksDownloadVideoResultData = {
-    body?: never;
-    path: {
-        /**
-         * Task Id
-         */
-        task_id: string;
-    };
-    query?: never;
-    url: '/api/v1/archive-tasks/{task_id}/result/video';
+  body?: never;
+  path: {
+    /**
+     * Task Id
+     */
+    task_id: string;
+  };
+  query?: never;
+  url: "/api/v1/archive-tasks/{task_id}/result/video";
 };
 
 export type ArchiveTasksDownloadVideoResultErrors = {
-    /**
-     * Validation Error
-     */
-    422: HttpValidationError;
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
 };
 
-export type ArchiveTasksDownloadVideoResultError = ArchiveTasksDownloadVideoResultErrors[keyof ArchiveTasksDownloadVideoResultErrors];
+export type ArchiveTasksDownloadVideoResultError =
+  ArchiveTasksDownloadVideoResultErrors[keyof ArchiveTasksDownloadVideoResultErrors];
 
 export type ArchiveTasksDownloadVideoResultResponses = {
-    /**
-     * Successful Response
-     */
-    200: unknown;
+  /**
+   * Successful Response
+   */
+  200: unknown;
 };
 
 export type RssFeedsListRssFeedsData = {
-    body?: never;
-    path?: never;
-    query?: never;
-    url: '/api/v1/rss-feeds';
+  body?: never;
+  path?: never;
+  query?: never;
+  url: "/api/v1/rss-feeds";
 };
 
 export type RssFeedsListRssFeedsResponses = {
-    /**
-     * Response Rss-Feeds-List Rss Feeds
-     * Successful Response
-     */
-    200: Array<RssFeedRead>;
+  /**
+   * Response Rss-Feeds-List Rss Feeds
+   * Successful Response
+   */
+  200: Array<RssFeedRead>;
 };
 
-export type RssFeedsListRssFeedsResponse = RssFeedsListRssFeedsResponses[keyof RssFeedsListRssFeedsResponses];
+export type RssFeedsListRssFeedsResponse =
+  RssFeedsListRssFeedsResponses[keyof RssFeedsListRssFeedsResponses];
 
 export type RssFeedsCreateRssFeedData = {
-    body: RssFeedCreate;
-    path?: never;
-    query?: never;
-    url: '/api/v1/rss-feeds';
+  body: RssFeedCreate;
+  path?: never;
+  query?: never;
+  url: "/api/v1/rss-feeds";
 };
 
 export type RssFeedsCreateRssFeedErrors = {
-    /**
-     * Validation Error
-     */
-    422: HttpValidationError;
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
 };
 
-export type RssFeedsCreateRssFeedError = RssFeedsCreateRssFeedErrors[keyof RssFeedsCreateRssFeedErrors];
+export type RssFeedsCreateRssFeedError =
+  RssFeedsCreateRssFeedErrors[keyof RssFeedsCreateRssFeedErrors];
 
 export type RssFeedsCreateRssFeedResponses = {
-    /**
-     * Successful Response
-     */
-    201: RssFeedRefreshResult;
+  /**
+   * Successful Response
+   */
+  201: RssFeedRefreshResult;
 };
 
-export type RssFeedsCreateRssFeedResponse = RssFeedsCreateRssFeedResponses[keyof RssFeedsCreateRssFeedResponses];
+export type RssFeedsCreateRssFeedResponse =
+  RssFeedsCreateRssFeedResponses[keyof RssFeedsCreateRssFeedResponses];
 
 export type RssFeedsDeleteRssFeedData = {
-    body?: never;
-    path: {
-        /**
-         * Feed Id
-         */
-        feed_id: string;
-    };
-    query?: never;
-    url: '/api/v1/rss-feeds/{feed_id}';
+  body?: never;
+  path: {
+    /**
+     * Feed Id
+     */
+    feed_id: string;
+  };
+  query?: never;
+  url: "/api/v1/rss-feeds/{feed_id}";
 };
 
 export type RssFeedsDeleteRssFeedErrors = {
-    /**
-     * Validation Error
-     */
-    422: HttpValidationError;
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
 };
 
-export type RssFeedsDeleteRssFeedError = RssFeedsDeleteRssFeedErrors[keyof RssFeedsDeleteRssFeedErrors];
+export type RssFeedsDeleteRssFeedError =
+  RssFeedsDeleteRssFeedErrors[keyof RssFeedsDeleteRssFeedErrors];
 
 export type RssFeedsDeleteRssFeedResponses = {
-    /**
-     * Successful Response
-     */
-    204: void;
+  /**
+   * Successful Response
+   */
+  204: void;
 };
 
-export type RssFeedsDeleteRssFeedResponse = RssFeedsDeleteRssFeedResponses[keyof RssFeedsDeleteRssFeedResponses];
+export type RssFeedsDeleteRssFeedResponse =
+  RssFeedsDeleteRssFeedResponses[keyof RssFeedsDeleteRssFeedResponses];
 
 export type RssFeedsUpdateRssFeedData = {
-    body: RssFeedUpdate;
-    path: {
-        /**
-         * Feed Id
-         */
-        feed_id: string;
-    };
-    query?: never;
-    url: '/api/v1/rss-feeds/{feed_id}';
+  body: RssFeedUpdate;
+  path: {
+    /**
+     * Feed Id
+     */
+    feed_id: string;
+  };
+  query?: never;
+  url: "/api/v1/rss-feeds/{feed_id}";
 };
 
 export type RssFeedsUpdateRssFeedErrors = {
-    /**
-     * Validation Error
-     */
-    422: HttpValidationError;
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
 };
 
-export type RssFeedsUpdateRssFeedError = RssFeedsUpdateRssFeedErrors[keyof RssFeedsUpdateRssFeedErrors];
+export type RssFeedsUpdateRssFeedError =
+  RssFeedsUpdateRssFeedErrors[keyof RssFeedsUpdateRssFeedErrors];
 
 export type RssFeedsUpdateRssFeedResponses = {
-    /**
-     * Successful Response
-     */
-    200: RssFeedRead;
+  /**
+   * Successful Response
+   */
+  200: RssFeedRead;
 };
 
-export type RssFeedsUpdateRssFeedResponse = RssFeedsUpdateRssFeedResponses[keyof RssFeedsUpdateRssFeedResponses];
+export type RssFeedsUpdateRssFeedResponse =
+  RssFeedsUpdateRssFeedResponses[keyof RssFeedsUpdateRssFeedResponses];
 
 export type RssFeedsRefreshRssFeedData = {
-    body?: never;
-    path: {
-        /**
-         * Feed Id
-         */
-        feed_id: string;
-    };
-    query?: never;
-    url: '/api/v1/rss-feeds/{feed_id}/refresh';
+  body?: never;
+  path: {
+    /**
+     * Feed Id
+     */
+    feed_id: string;
+  };
+  query?: never;
+  url: "/api/v1/rss-feeds/{feed_id}/refresh";
 };
 
 export type RssFeedsRefreshRssFeedErrors = {
-    /**
-     * Validation Error
-     */
-    422: HttpValidationError;
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
 };
 
-export type RssFeedsRefreshRssFeedError = RssFeedsRefreshRssFeedErrors[keyof RssFeedsRefreshRssFeedErrors];
+export type RssFeedsRefreshRssFeedError =
+  RssFeedsRefreshRssFeedErrors[keyof RssFeedsRefreshRssFeedErrors];
 
 export type RssFeedsRefreshRssFeedResponses = {
-    /**
-     * Successful Response
-     */
-    200: RssFeedRefreshResult;
+  /**
+   * Successful Response
+   */
+  200: RssFeedRefreshResult;
 };
 
-export type RssFeedsRefreshRssFeedResponse = RssFeedsRefreshRssFeedResponses[keyof RssFeedsRefreshRssFeedResponses];
+export type RssFeedsRefreshRssFeedResponse =
+  RssFeedsRefreshRssFeedResponses[keyof RssFeedsRefreshRssFeedResponses];
 
 export type AuthLogoutData = {
-    body?: never;
-    path?: never;
-    query?: never;
-    url: '/api/v1/auth/logout';
+  body?: never;
+  path?: never;
+  query?: never;
+  url: "/api/v1/auth/logout";
 };
 
 export type AuthLogoutResponses = {
-    /**
-     * Successful Response
-     */
-    204: void;
+  /**
+   * Successful Response
+   */
+  204: void;
 };
 
 export type AuthLogoutResponse = AuthLogoutResponses[keyof AuthLogoutResponses];
 
 export type AuthReadCurrentUserData = {
-    body?: never;
-    path?: never;
-    query?: never;
-    url: '/api/v1/auth/me';
+  body?: never;
+  path?: never;
+  query?: never;
+  url: "/api/v1/auth/me";
 };
 
 export type AuthReadCurrentUserResponses = {
-    /**
-     * Successful Response
-     */
-    200: AuthSessionRead;
+  /**
+   * Successful Response
+   */
+  200: AuthSessionRead;
 };
 
-export type AuthReadCurrentUserResponse = AuthReadCurrentUserResponses[keyof AuthReadCurrentUserResponses];
+export type AuthReadCurrentUserResponse =
+  AuthReadCurrentUserResponses[keyof AuthReadCurrentUserResponses];
 
 export type ClientOptions = {
-    baseUrl: `${string}://${string}` | (string & {});
+  baseUrl: `${string}://${string}` | (string & {});
 };
