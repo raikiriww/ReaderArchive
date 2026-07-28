@@ -1802,6 +1802,107 @@ def test_active_chrome_singleton_files_are_kept(
     assert (profile_dir / "SingletonSocket").is_symlink()
 
 
+def test_singlefile_archive_reports_output_when_archive_is_missing(
+    tmp_path: Path,
+) -> None:
+    from app.archiver import SingleFileArchiver
+
+    script = tmp_path / "single-file-missing-output"
+    script.write_text(
+        """#!/usr/bin/env python3
+import sys
+
+print("Execution context not found for SingleFile world", file=sys.stderr)
+""",
+        encoding="utf-8",
+    )
+    script.chmod(0o755)
+    settings = Settings(
+        archive_dir=tmp_path / "archive",
+        browser_profile_dir=tmp_path / "profile",
+        single_file_path=str(script),
+        use_xvfb=False,
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="Execution context not found for SingleFile world",
+    ):
+        asyncio.run(
+            SingleFileArchiver(settings).archive(
+                "https://example.com/",
+                "page.html",
+            )
+        )
+
+
+def test_archive_task_keeps_singlefile_error_when_archive_is_missing(
+    tmp_path: Path,
+    fake_yt_dlp: Path,
+) -> None:
+    script = tmp_path / "single-file-missing-task-output"
+    script.write_text(
+        """#!/usr/bin/env python3
+import sys
+
+print("Execution context not found for SingleFile world", file=sys.stderr)
+""",
+        encoding="utf-8",
+    )
+    script.chmod(0o755)
+    settings = Settings(
+        database_url=make_database_url(),
+        archive_dir=tmp_path / "archive",
+        browser_profile_dir=tmp_path / "profile",
+        single_file_path=str(script),
+        yt_dlp_path=str(fake_yt_dlp),
+        use_xvfb=False,
+        semantic_search_enabled=False,
+    )
+    app = create_app(settings)
+
+    with TestClient(app) as client:
+        login_as_admin(client)
+        response = client.post(
+            "/api/v1/archive-tasks",
+            json={"url": "https://example.com/"},
+        )
+        assert response.status_code == 202
+        task = wait_for_finished(client, response.json()["task_id"])
+
+    assert task["status"] == "succeeded"
+    assert task["result"]["page_error"] == (
+        "Execution context not found for SingleFile world"
+    )
+
+
+def test_singlefile_archive_uses_fallback_when_silent_archive_is_missing(
+    tmp_path: Path,
+) -> None:
+    from app.archiver import SingleFileArchiver
+
+    script = tmp_path / "single-file-silent"
+    script.write_text("#!/usr/bin/env python3\n", encoding="utf-8")
+    script.chmod(0o755)
+    settings = Settings(
+        archive_dir=tmp_path / "archive",
+        browser_profile_dir=tmp_path / "profile",
+        single_file_path=str(script),
+        use_xvfb=False,
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="SingleFile finished without creating an archive file",
+    ):
+        asyncio.run(
+            SingleFileArchiver(settings).archive(
+                "https://example.com/",
+                "page.html",
+            )
+        )
+
+
 def test_singlefile_archive_uses_ephemeral_cache(
     tmp_path: Path,
     fake_yt_dlp: Path,
