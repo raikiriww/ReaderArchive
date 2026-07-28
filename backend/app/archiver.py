@@ -273,20 +273,24 @@ class SingleFileArchiver:
                 msg = "Archive timed out."
                 raise RuntimeError(msg) from exc
 
-        if process.returncode != 0:
-            output = "\n".join(
-                text
-                for text in (
-                    stdout.decode(errors="replace").strip(),
-                    stderr.decode(errors="replace").strip(),
-                )
-                if text
+        output = "\n".join(
+            text
+            for text in (
+                stdout.decode(errors="replace").strip(),
+                stderr.decode(errors="replace").strip(),
             )
+            if text
+        )
+        if process.returncode != 0:
             msg = output[-1000:] if output else "SingleFile failed."
             raise RuntimeError(msg)
 
         if not output_path.exists():
-            msg = "SingleFile finished without creating an archive file."
+            msg = (
+                output[-1000:]
+                if output
+                else "SingleFile finished without creating an archive file."
+            )
             raise RuntimeError(msg)
 
     def _archive_command(

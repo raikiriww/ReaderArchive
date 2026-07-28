@@ -15,8 +15,12 @@ diff --git a/lib/cdp-client.js b/lib/cdp-client.js
 index c54ad58..9bad85f 100644
 --- a/lib/cdp-client.js
 +++ b/lib/cdp-client.js
-@@ -56,6 +56,7 @@ export {
- 	closeBrowser
+@@ -54,8 +54,10 @@ export {
+ 	initialize,
+ 	getPageData,
+-	closeBrowser
++	closeBrowser,
++	isLifecycleEventForCurrentTopFrame
  };
 
 +let browserApiUrl;
@@ -125,3 +129,51 @@ index c54ad58..9bad85f 100644
  async function loadPage({ Page, Runtime }, { options, debugMessages }) {
  	const LOAD_TIMEOUT_ERROR_MESSAGE = "Load timeout";
  	await Runtime.enable();
+@@ -432,7 +458,7 @@ async function loadPage({ Page, Runtime }, { options, debugMessages }) {
+ 
+ async function getTopFrameContextId({ Page, Runtime }, { options, debugMessages }) {
+ 	await Page.setLifecycleEventsEnabled({ enabled: true });
+-	const state = { topFrameId: undefined, contextIds: [] };
++	const state = { topFrameId: undefined, topLoaderId: undefined, contextIds: [] };
+ 	const removeContextListener = setupContextCreatedListener({ Runtime }, state);
+ 	try {
+ 		await waitForPageReadyState({ Page }, state, { options, debugMessages });
+@@ -476,10 +502,11 @@ async function waitForPageReadyState({ Page }, state, { options, debugMessages
+ 
+ function createLifecycleEventHandler(state, timeoutState, resolve, cleanup, { options, debugMessages }) {
+ 	return ({ params }) => {
+-		const { frameId, name } = params;
+-		if (frameId === state.topFrameId) {
+-			logData(["Detecting lifecycle event", name], { options, debugMessages });
++		const { name } = params;
++		if (!isLifecycleEventForCurrentTopFrame(params, state)) {
++			return;
+ 		}
++		logData(["Detecting lifecycle event", name], { options, debugMessages });
+ 		const shouldResolve = name === options.browserWaitUntil ||
+ 			(timeoutState.timeoutId && NETWORK_STATES.indexOf(name) < NETWORK_STATES.indexOf(options.browserWaitUntil));
+ 		if (shouldResolve) {
+@@ -510,12 +537,23 @@ function createFrameNavigatedHandler(state, timeoutState, reject, cleanup, { op
+ 				reject(new Error(UNREACHABLE_URL_ERROR_MESSAGE + ": " + frame.unreachableUrl));
+ 			} else {
+ 				logData(["Detecting top frame ID"], { options, debugMessages });
+ 				state.topFrameId = frame.id;
++				state.topLoaderId = frame.loaderId;
++				state.contextIds = [];
+ 			}
+ 		}
+ 	};
+ }
+ 
++function isLifecycleEventForCurrentTopFrame(params, state) {
++	return Boolean(
++		state.topFrameId &&
++		state.topLoaderId &&
++		params.frameId === state.topFrameId &&
++		params.loaderId === state.topLoaderId
++	);
++}
++
+ async function findValidSingleFileContext({ Runtime }, contextIds, { options, debugMessages }) {
+ 	const CONTEXT_NOT_FOUND_ERROR_MESSAGE = "Execution context not found for SingleFile world";
+ 	const SINGLE_FILE_DETECTION_TEST = "typeof singlefile !== 'undefined'";
