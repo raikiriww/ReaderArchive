@@ -371,9 +371,10 @@ def create_router() -> APIRouter:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         if not result_path.exists():
             raise HTTPException(status_code=410, detail="Archive file is missing.")
+        media_type = mimetypes.guess_type(result_path.name)[0] or "application/octet-stream"
         return FileResponse(
             result_path,
-            media_type="text/html",
+            media_type=media_type,
             filename=service.task_file_display_name(task, result_path),
             content_disposition_type=content_disposition_type,
         )

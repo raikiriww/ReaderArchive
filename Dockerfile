@@ -18,7 +18,7 @@ COPY docker/single-file-existing-tab.patch /tmp/single-file-existing-tab.patch
 COPY docker/single-file-navigation.test.js /tmp/single-file-navigation.test.js
 
 RUN patch -p1 < /tmp/single-file-existing-tab.patch \
-  && deno test --allow-read /tmp/single-file-navigation.test.js \
+  && deno test --allow-read --allow-write /tmp/single-file-navigation.test.js \
   && deno compile \
     --allow-read \
     --allow-write \

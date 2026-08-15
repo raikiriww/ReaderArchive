@@ -1,4 +1,6 @@
 import asyncio
+import base64
+import io
 import os
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -10,6 +12,7 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 from psycopg import sql
+from pypdf import PdfWriter
 from sqlalchemy import text
 from sqlalchemy.engine import make_url
 from sqlmodel import Session
@@ -100,6 +103,51 @@ import sys
 pathlib.Path(sys.argv[2]).write_text(
     f"<html><head><title>Saved title for {sys.argv[1]}</title></head>"
     f"<body>archived {sys.argv[1]}</body></html>",
+    encoding="utf-8",
+)
+""",
+        encoding="utf-8",
+    )
+    script.chmod(0o755)
+    return script
+
+
+@pytest.fixture
+def fake_pdf_toggle_single_file(tmp_path: Path) -> Path:
+    pdf_stream = io.BytesIO()
+    pdf_writer = PdfWriter()
+    pdf_writer.add_blank_page(width=612, height=792)
+    pdf_writer.write(pdf_stream)
+    encoded_pdf = base64.b64encode(pdf_stream.getvalue()).decode("ascii")
+    script = tmp_path / "single-file-pdf-toggle"
+    script.write_text(
+        f"""#!/usr/bin/env python3
+import base64
+import pathlib
+import sys
+
+output = pathlib.Path(sys.argv[2])
+document_option = next(
+    value for value in sys.argv if value.startswith("--browser-document-file=")
+)
+document = pathlib.Path(document_option.split("=", 1)[1])
+counter = output.parent / "pdf-toggle.count"
+call = int(counter.read_text(encoding="utf-8")) + 1 if counter.exists() else 1
+counter.write_text(str(call), encoding="utf-8")
+if call % 2:
+    document.write_bytes(base64.b64decode({encoded_pdf!r}))
+    content_type = "application/octet-stream"
+    output.write_text("<html><body>PDF viewer shell</body></html>", encoding="utf-8")
+else:
+    document.write_text("<html><body>live response</body></html>", encoding="utf-8")
+    content_type = "text/html; charset=utf-8"
+    output.write_text(
+        "<html><head><title>HTML after rearchive</title></head>"
+        "<body>normal archived page</body></html>",
+        encoding="utf-8",
+    )
+document.with_name(document.name + ".json").write_text(
+    '{{"status": 200, "contentType": "' + content_type + '"}}',
     encoding="utf-8",
 )
 """,
@@ -556,6 +604,72 @@ def test_archive_task_lifecycle(
         assert video_response.status_code == 200
         assert video_response.content == b"fake video"
         assert "attachment" in video_response.headers["content-disposition"]
+
+
+def test_pdf_result_view_download_and_rearchive_switches_file_type(
+    tmp_path: Path,
+    fake_pdf_toggle_single_file: Path,
+    fake_failing_yt_dlp: Path,
+) -> None:
+    settings = Settings(
+        database_url=make_database_url(),
+        archive_dir=tmp_path / "archive",
+        browser_profile_dir=tmp_path / "profile",
+        single_file_path=str(fake_pdf_toggle_single_file),
+        yt_dlp_path=str(fake_failing_yt_dlp),
+        chrome_path="/bin/true",
+        use_xvfb=False,
+        semantic_search_enabled=False,
+    )
+    app = create_app(settings)
+
+    with TestClient(app) as client:
+        login_as_admin(client)
+        response = client.post(
+            "/api/v1/archive-tasks",
+            json={"url": "https://example.com/download?id=123"},
+        )
+        task_id = response.json()["task_id"]
+        task = wait_for_finished(client, task_id)
+
+        assert task["status"] == "succeeded"
+        assert task["result"]["file_name"] == f"{task_id}.pdf"
+        assert not (settings.archive_dir / f"{task_id}.html").exists()
+        assert client.get(f"/api/v1/archive-tasks/{task_id}/result/view").headers[
+            "content-type"
+        ].startswith("application/pdf")
+        download = client.get(f"/api/v1/archive-tasks/{task_id}/result")
+        assert download.status_code == 200
+        assert download.content.startswith(b"%PDF-")
+        assert f'filename="{task_id}.pdf"' not in download.headers["content-disposition"]
+        file_list = client.get(f"/api/v1/archive-tasks/{task_id}/file-list").json()
+        assert {item["file_name"] for item in file_list} == {f"{task_id}.pdf"}
+        assert file_list[0]["display_name"].endswith(".pdf")
+        rename = client.patch(
+            f"/api/v1/archive-tasks/{task_id}/files/{task_id}.pdf",
+            json={"display_name": "saved-document.pdf"},
+        )
+        assert rename.status_code == 200
+        assert rename.json()["display_name"] == "saved-document.pdf"
+        renamed_download = client.get(f"/api/v1/archive-tasks/{task_id}/result")
+        assert "saved-document.pdf" in renamed_download.headers["content-disposition"]
+
+        rearchive = client.post(f"/api/v1/archive-tasks/{task_id}/rearchive")
+        assert rearchive.status_code == 202
+        task = wait_for_finished(client, task_id)
+        assert task["result"]["file_name"] == f"{task_id}.html"
+        assert not (settings.archive_dir / f"{task_id}.pdf").exists()
+        html_view = client.get(f"/api/v1/archive-tasks/{task_id}/result/view")
+        assert html_view.headers["content-type"].startswith("text/html")
+        assert "normal archived page" in html_view.text
+
+        rearchive = client.post(f"/api/v1/archive-tasks/{task_id}/rearchive")
+        assert rearchive.status_code == 202
+        task = wait_for_finished(client, task_id)
+        assert task["result"]["file_name"] == f"{task_id}.pdf"
+
+        assert client.delete(f"/api/v1/archive-tasks/{task_id}").status_code == 204
+        assert not list(settings.archive_dir.glob(f"{task_id}.*"))
 
 
 def test_semantic_search_returns_matching_excerpt(

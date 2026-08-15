@@ -29,6 +29,13 @@ class BrowserTab:
     title: str = ""
 
 
+@dataclass(frozen=True)
+class ArchiveArtifact:
+    file_name: str
+    media_type: str
+    page_count: int | None = None
+
+
 class BrowserOpener:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
@@ -226,7 +233,7 @@ class SingleFileArchiver:
         *,
         browser_target_id: str | None = None,
         skip_navigation: bool = False,
-    ) -> None:
+    ) -> ArchiveArtifact:
         archive_dir = self.settings.archive_dir
         profile_dir = self.settings.browser_profile_dir
         home_dir = self._browser_home_dir(profile_dir)
@@ -236,6 +243,11 @@ class SingleFileArchiver:
         self._remove_stale_singleton_files(profile_dir)
 
         output_path = archive_dir / output_file
+        document_path = archive_dir / f"{Path(output_file).stem}.document.tmp"
+        document_metadata_path = document_path.with_name(f"{document_path.name}.json")
+        pdf_path = output_path.with_suffix(".pdf")
+        document_path.unlink(missing_ok=True)
+        document_metadata_path.unlink(missing_ok=True)
         cache_context = (
             nullcontext()
             if self.settings.browser_remote_debugging_url
@@ -270,6 +282,9 @@ class SingleFileArchiver:
                 )
             except TimeoutError as exc:
                 await self._stop_process_tree(process)
+                output_path.unlink(missing_ok=True)
+                document_path.unlink(missing_ok=True)
+                document_metadata_path.unlink(missing_ok=True)
                 msg = "Archive timed out."
                 raise RuntimeError(msg) from exc
 
@@ -281,17 +296,43 @@ class SingleFileArchiver:
             )
             if text
         )
-        if process.returncode != 0:
-            msg = output[-1000:] if output else "SingleFile failed."
-            raise RuntimeError(msg)
+        try:
+            if process.returncode != 0:
+                msg = output[-1000:] if output else "SingleFile failed."
+                raise RuntimeError(msg)
 
-        if not output_path.exists():
-            msg = (
-                output[-1000:]
-                if output
-                else "SingleFile finished without creating an archive file."
-            )
-            raise RuntimeError(msg)
+            is_valid_pdf, pdf_page_count = self._inspect_pdf(document_path)
+            if is_valid_pdf:
+                output_path.unlink(missing_ok=True)
+                pdf_path.unlink(missing_ok=True)
+                document_path.replace(pdf_path)
+                return ArchiveArtifact(
+                    file_name=pdf_path.name,
+                    media_type="application/pdf",
+                    page_count=pdf_page_count,
+                )
+
+            if self._document_is_pdf(document_path, document_metadata_path):
+                msg = "The browser returned an empty or invalid PDF document."
+                raise RuntimeError(msg)
+
+            if not output_path.exists():
+                msg = (
+                    output[-1000:]
+                    if output
+                    else "SingleFile finished without creating an archive file."
+                )
+                raise RuntimeError(msg)
+            if output_path.stat().st_size == 0:
+                msg = "SingleFile created an empty archive file."
+                raise RuntimeError(msg)
+            return ArchiveArtifact(file_name=output_path.name, media_type="text/html")
+        except Exception:
+            output_path.unlink(missing_ok=True)
+            raise
+        finally:
+            document_path.unlink(missing_ok=True)
+            document_metadata_path.unlink(missing_ok=True)
 
     def _archive_command(
         self,
@@ -318,6 +359,7 @@ class SingleFileArchiver:
             "--remove-unused-styles=false",
             "--remove-alternative-medias=false",
             "--filename-conflict-action=overwrite",
+            f"--browser-document-file={output_path.with_name(f'{output_path.stem}.document.tmp')}",
         ]
         if self.settings.browser_remote_debugging_url:
             command.append(f"--browser-server={self.settings.browser_remote_debugging_url}")
@@ -350,6 +392,42 @@ class SingleFileArchiver:
             ],
         )
         return command
+
+    def _inspect_pdf(self, path: Path) -> tuple[bool, int | None]:
+        if not path.is_file() or path.stat().st_size < 8:
+            return False, None
+        try:
+            with path.open("rb") as handle:
+                if b"%PDF-" not in handle.read(1024):
+                    return False, None
+                from pypdf import PdfReader
+
+                reader = PdfReader(handle, strict=False)
+                if reader.is_encrypted and not reader.decrypt(""):
+                    return True, None
+                page_count = len(reader.pages)
+                if page_count < 1:
+                    return False, None
+                # Force page-tree traversal while the temporary file is still open.
+                for page in reader.pages:
+                    page.get("/Type")
+                return True, page_count
+        except Exception:
+            return False, None
+
+    def _document_is_pdf(self, path: Path, metadata_path: Path) -> bool:
+        try:
+            with path.open("rb") as handle:
+                if b"%PDF-" in handle.read(1024):
+                    return True
+        except OSError:
+            pass
+        try:
+            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return False
+        content_type = metadata.get("contentType") if isinstance(metadata, dict) else None
+        return isinstance(content_type, str) and content_type.split(";", 1)[0].strip().lower() == "application/pdf"
 
     def _remove_stale_singleton_files(self, profile_dir: Path) -> None:
         singleton_files = list(profile_dir.glob("Singleton*"))
@@ -488,6 +566,7 @@ class YtDlpDownloader:
                 path not in existing_files
                 and path.is_file()
                 and path.suffix not in {".part", ".ytdl"}
+                and not self._is_page_archive_file(output_stem, path)
                 and not self._is_user_uploaded_file(output_stem, path)
             )
         ]
@@ -506,10 +585,18 @@ class YtDlpDownloader:
             if (
                 path not in existing_files
                 and path.is_file()
-                and path.suffix != ".html"
+                and not self._is_page_archive_file(output_stem, path)
                 and not self._is_user_uploaded_file(output_stem, path)
             ):
                 path.unlink(missing_ok=True)
+
+    def _is_page_archive_file(self, output_stem: str, path: Path) -> bool:
+        return path.name in {
+            f"{output_stem}.html",
+            f"{output_stem}.pdf",
+            f"{output_stem}.document.tmp",
+            f"{output_stem}.document.tmp.json",
+        }
 
     def _is_user_uploaded_file(self, output_stem: str, path: Path) -> bool:
         return path.name.startswith(f"{output_stem}.upload-")

@@ -955,6 +955,9 @@ class ArchiveTaskRepository:
     def update_entry_title(self, task_id: str, entry_title: str) -> None:
         self._update_task(task_id, entry_title=entry_title)
 
+    def update_output_file(self, task_id: str, output_file: str) -> bool:
+        return self._update_task(task_id, output_file=output_file)
+
     def update_custom_title(self, task_id: str, custom_title: str | None) -> bool:
         return self._update_task(task_id, custom_title=custom_title)
 

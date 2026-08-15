@@ -125,6 +125,8 @@ class SemanticDocumentPreparer:
 
 
 def extract_readable_text(path: Path) -> str | None:
+    if path.suffix.lower() == ".pdf":
+        return _extract_from_pdf(path)
     try:
         html = path.read_text(encoding="utf-8", errors="ignore")
     except OSError:
@@ -134,6 +136,23 @@ def extract_readable_text(path: Path) -> str | None:
     if extracted:
         return extracted
     return _extract_with_html_parser(html)
+
+
+def _extract_from_pdf(path: Path) -> str | None:
+    try:
+        from pypdf import PdfReader
+
+        reader = PdfReader(path, strict=False)
+        if reader.is_encrypted:
+            try:
+                if not reader.decrypt(""):
+                    return None
+            except Exception:
+                return None
+        text = "\n\n".join(page.extract_text() or "" for page in reader.pages)
+    except Exception:
+        return None
+    return normalize_text(text) or None
 
 
 def chunk_text(

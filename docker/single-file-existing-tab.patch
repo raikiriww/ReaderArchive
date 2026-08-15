@@ -15,12 +15,14 @@ diff --git a/lib/cdp-client.js b/lib/cdp-client.js
 index c54ad58..9bad85f 100644
 --- a/lib/cdp-client.js
 +++ b/lib/cdp-client.js
-@@ -54,8 +54,10 @@ export {
+@@ -54,8 +54,12 @@ export {
  	initialize,
  	getPageData,
 -	closeBrowser
 +	closeBrowser,
-+	isLifecycleEventForCurrentTopFrame
++	isLifecycleEventForCurrentTopFrame,
++	captureMainDocument,
++	getCurrentPdfUrl
  };
 
 +let browserApiUrl;
@@ -177,3 +179,224 @@ index c54ad58..9bad85f 100644
  async function findValidSingleFileContext({ Runtime }, contextIds, { options, debugMessages }) {
  	const CONTEXT_NOT_FOUND_ERROR_MESSAGE = "Execution context not found for SingleFile world";
  	const SINGLE_FILE_DETECTION_TEST = "typeof singlefile !== 'undefined'";
+--- a/options.js
++++ b/options.js
+@@ -54,6 +54,7 @@
+ 	"browser-server": { description: "Server to connect to", type: "string" },
+ 	"browser-target-id": { description: "Existing browser target to capture", type: "string" },
+ 	"browser-skip-navigation": { description: "Capture the current target without navigating", type: "boolean" },
++	"browser-document-file": { description: "Path where the final main document response is copied", type: "string" },
+ 	"browser-headless": { description: "Run the browser in headless mode", type: "boolean", defaultValue: true },
+ 	"browser-executable-path": { description: "Path to chrome/chromium executable", type: "string" },
+ 	"browser-width": { description: "Width of the browser viewport in pixels", type: "number", defaultValue: 1280 },
+--- a/lib/cdp-client.js
++++ b/lib/cdp-client.js
+@@ -21,7 +21,7 @@
+  *   Source.
+  */
+ 
+-/* global setTimeout, clearTimeout, URL, AbortController */
++/* global setTimeout, clearTimeout, URL, AbortController, TextEncoder, Uint8Array, atob */
+ 
+ import {
+ 	launchBrowser,
+@@ -45,6 +45,7 @@
+ 	arrayBufferToBase64,
+ 	getAlternativeUrl
+ } from "./cdp-client-util.js";
++import { Deno } from "./deno-polyfill.js";
+ 
+ const LOAD_TIMEOUT_ERROR = "ERR_LOAD_TIMEOUT";
+ const CAPTURE_TIMEOUT_ERROR = "ERR_CAPTURE_TIMEOUT";
+@@ -237,7 +238,7 @@
+ 	await Emulation.setUserAgentOverride(agentOptions);
+ }
+ 
+-async function setupNetworkInterception({ Browser, Emulation, Fetch, Network }, { options, debugMessages, httpInfo }) {
++async function setupNetworkInterception({ Browser, Emulation, Fetch, Network, Page }, { options, debugMessages, httpInfo }) {
+ 	const REQUEST_STAGE = "Request";
+ 	const RESPONSE_STAGE = "Response";
+ 	const DENY_BEHAVIOR = "deny";
+@@ -249,7 +250,8 @@
+ 	if (handleAuthRequests) {
+ 		setupProxyAuth({ Fetch }, { options, debugMessages });
+ 	}
+-	setupRequestInterception({ Fetch }, { options, debugMessages, httpInfo });
++	const { frameTree } = await Page.getFrameTree();
++	setupRequestInterception({ Fetch }, { options, debugMessages, httpInfo, mainFrameId: frameTree.frame.id });
+ 	if (options.httpHeaders) {
+ 		await setupHttpHeaders({ Network }, { options, debugMessages });
+ 	}
+@@ -278,13 +280,14 @@
+ 	});
+ }
+ 
+-function setupRequestInterception({ Fetch }, { options, debugMessages, httpInfo }) {
++function setupRequestInterception({ Fetch }, { options, debugMessages, httpInfo, mainFrameId }) {
+ 	const REQUEST_PAUSED_EVENT_TYPE = "requestPaused";
+ 	const ABORTED_ERROR_REASON = "Aborted";
+ 	const urlState = { url: options.url, alternativeUrl: getAlternativeUrl(options.url) };
+ 	Fetch.addEventListener(REQUEST_PAUSED_EVENT_TYPE, async ({ params }) => {
+ 		const { requestId, request } = params;
+ 		captureHttpInfo(params, urlState, { options, debugMessages, httpInfo });
++		await captureMainDocument({ Fetch }, params, mainFrameId, { options, debugMessages });
+ 		if (shouldBlockRequest(request.url)) {
+ 			try {
+ 				await Fetch.failRequest({ requestId, errorReason: ABORTED_ERROR_REASON });
+@@ -312,9 +315,40 @@
+ 			return true;
+ 		}
+ 		return false;
++	}
++}
++
++async function captureMainDocument({ Fetch }, params, mainFrameId, { options, debugMessages }) {
++	const REDIRECT_STATUS_CODES = [301, 302, 303, 307, 308];
++	const DOCUMENT_RESOURCE_TYPE = "Document";
++	const { frameId, requestId, resourceType, responseStatusCode } = params;
++	const shouldCapture = options.browserDocumentFile &&
++		frameId === mainFrameId &&
++		resourceType === DOCUMENT_RESOURCE_TYPE &&
++		responseStatusCode !== undefined &&
++		!REDIRECT_STATUS_CODES.includes(responseStatusCode);
++	if (!shouldCapture) {
++		return;
+ 	}
++	try {
++		const { body, base64Encoded } = await Fetch.getResponseBody({ requestId });
++		const bytes = base64Encoded ? decodeBase64(body) : new TextEncoder().encode(body);
++		await Deno.writeFile(options.browserDocumentFile, bytes);
++		logData(["Copied main document response"], { options, debugMessages });
++	} catch (error) {
++		logData(["Unable to copy main document response", error.message], { options, debugMessages });
++	}
+ }
+ 
++function decodeBase64(value) {
++	const binary = atob(value);
++	const bytes = new Uint8Array(binary.length);
++	for (let index = 0; index < binary.length; index++) {
++		bytes[index] = binary.charCodeAt(index);
++	}
++	return bytes;
++}
++
+ function captureHttpInfo(params, urlState, { options, debugMessages, httpInfo }) {
+ 	const REDIRECT_STATUS_CODES = [301, 302, 303, 307, 308];
+ 	const DOCUMENT_RESOURCE_TYPE = "Document";
+--- a/lib/cdp-client.js
++++ b/lib/cdp-client.js
+@@ -322,7 +322,7 @@
+ async function captureMainDocument({ Fetch }, params, mainFrameId, { options, debugMessages }) {
+ 	const REDIRECT_STATUS_CODES = [301, 302, 303, 307, 308];
+ 	const DOCUMENT_RESOURCE_TYPE = "Document";
+-	const { frameId, requestId, resourceType, responseStatusCode } = params;
++	const { frameId, requestId, resourceType, responseHeaders, responseStatusCode } = params;
+ 	const shouldCapture = options.browserDocumentFile &&
+ 		frameId === mainFrameId &&
+ 		resourceType === DOCUMENT_RESOURCE_TYPE &&
+@@ -332,6 +332,11 @@
+ 		return;
+ 	}
+ 	try {
++		const contentType = responseHeaders?.find(header => header.name.toLowerCase() === "content-type")?.value || "";
++		await Deno.writeTextFile(
++			options.browserDocumentFile + ".json",
++			JSON.stringify({ status: responseStatusCode, contentType })
++		);
+ 		const { body, base64Encoded } = await Fetch.getResponseBody({ requestId });
+		const bytes = base64Encoded ? decodeBase64(body) : new TextEncoder().encode(body);
+		await Deno.writeFile(options.browserDocumentFile, bytes);
+
+--- a/lib/cdp-client.js
++++ b/lib/cdp-client.js
+@@ -21,7 +21,7 @@
+  *   Source.
+  */
+ 
+-/* global setTimeout, clearTimeout, URL, AbortController, TextEncoder, Uint8Array, atob */
++/* global setTimeout, clearTimeout, URL, AbortController, TextEncoder, TextDecoder, Uint8Array, atob */
+ 
+ import {
+ 	launchBrowser,
+@@ -285,10 +285,11 @@
+ 	const REQUEST_PAUSED_EVENT_TYPE = "requestPaused";
+ 	const ABORTED_ERROR_REASON = "Aborted";
+ 	const urlState = { url: options.url, alternativeUrl: getAlternativeUrl(options.url) };
++	const documentCaptureState = { pdfCaptured: false };
+ 	Fetch.addEventListener(REQUEST_PAUSED_EVENT_TYPE, async ({ params }) => {
+ 		const { requestId, request } = params;
+ 		captureHttpInfo(params, urlState, { options, debugMessages, httpInfo });
+-		await captureMainDocument({ Fetch }, params, mainFrameId, { options, debugMessages });
++		await captureMainDocument({ Fetch }, params, mainFrameId, { options, debugMessages }, documentCaptureState);
+ 		if (shouldBlockRequest(request.url)) {
+ 			try {
+ 				await Fetch.failRequest({ requestId, errorReason: ABORTED_ERROR_REASON });
+@@ -319,11 +320,12 @@
+ 	}
+ }
+ 
+-async function captureMainDocument({ Fetch }, params, mainFrameId, { options, debugMessages }) {
++async function captureMainDocument({ Fetch }, params, mainFrameId, { options, debugMessages }, captureState = {}) {
+ 	const REDIRECT_STATUS_CODES = [301, 302, 303, 307, 308];
+ 	const DOCUMENT_RESOURCE_TYPE = "Document";
+ 	const { frameId, requestId, resourceType, responseHeaders, responseStatusCode } = params;
+ 	const shouldCapture = options.browserDocumentFile &&
++		!captureState.pdfCaptured &&
+ 		frameId === mainFrameId &&
+ 		resourceType === DOCUMENT_RESOURCE_TYPE &&
+ 		responseStatusCode !== undefined &&
+@@ -340,6 +342,8 @@
+ 		const { body, base64Encoded } = await Fetch.getResponseBody({ requestId });
+ 		const bytes = base64Encoded ? decodeBase64(body) : new TextEncoder().encode(body);
+ 		await Deno.writeFile(options.browserDocumentFile, bytes);
++		captureState.pdfCaptured = contentType.split(";", 1)[0].trim().toLowerCase() === "application/pdf" ||
++			new TextDecoder().decode(bytes.slice(0, 1024)).includes("%PDF-");
+ 		logData(["Copied main document response"], { options, debugMessages });
+ 	} catch (error) {
+ 		logData(["Unable to copy main document response", error.message], { options, debugMessages });
+--- a/lib/cdp-client.js
++++ b/lib/cdp-client.js
+@@ -421,8 +421,16 @@
+ async function getContextId({ Debugger, Page, Runtime }, { options, debugMessages }) {
++	const useCurrentPage = options.browserTargetId && options.browserSkipNavigation;
++	const currentPdfUrl = useCurrentPage
++		? await getCurrentPdfUrl({ Runtime }, { options, debugMessages })
++		: "";
++	const pageContext = {
++		options: currentPdfUrl ? { ...options, url: currentPdfUrl } : options,
++		debugMessages
++	};
+ 	const [contextId] = await Promise.all([
+-		options.browserTargetId && options.browserSkipNavigation
+-			? loadCurrentPage({ Page, Runtime }, { options, debugMessages })
+-			: loadPage({ Page, Runtime }, { options, debugMessages }),
++		useCurrentPage && !currentPdfUrl
++			? loadCurrentPage({ Page, Runtime }, pageContext)
++			: loadPage({ Page, Runtime }, pageContext),
+ 		options.browserDebug ? waitForDebuggerReady() : Promise.resolve()
+ 	]);
+ 	return contextId;
+@@ -445,6 +453,22 @@
+ 	}
+ }
+ 
++async function getCurrentPdfUrl({ Runtime }, { options, debugMessages }) {
++	await Runtime.enable();
++	try {
++		const { result } = await Runtime.evaluate({
++			expression: "document.contentType === 'application/pdf' ? location.href : ''",
++			returnByValue: true
++		});
++		return typeof result.value === "string" ? result.value : "";
++	} catch (error) {
++		logData(["Unable to inspect the current document type", error.message], { options, debugMessages });
++		return "";
++	} finally {
++		await Runtime.disable();
++	}
++}
++
+ async function loadCurrentPage({ Page, Runtime }, { options, debugMessages }) {
+ 	await Runtime.enable();
+ 	await Page.enable();
