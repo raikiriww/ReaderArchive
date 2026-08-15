@@ -379,7 +379,7 @@ class ArchiveTaskService:
                 for path in self.archiver.settings.archive_dir.glob(
                     f"{task.task_id}.*",
                 )
-                if path.is_file()
+                if path.is_file() and ".document.tmp" not in path.name
             ),
             key=lambda path: path.name,
         )
@@ -703,12 +703,16 @@ class ArchiveTaskService:
                         owned_by_reader=True,
                     )
                 browser_target_id = tab.target_id
-            await self.archiver.archive(
+            artifact = await self.archiver.archive(
                 task.url,
                 output_file,
                 browser_target_id=browser_target_id,
                 skip_navigation=reuse_existing_tab,
             )
+            output_path = self.archiver.settings.archive_dir / artifact.file_name
+            if not self.repository.update_output_file(task.task_id, artifact.file_name):
+                msg = "Archive task was deleted while its page was being saved."
+                raise RuntimeError(msg)
             current_tab = (
                 await self.browser_opener.get(browser_target_id)
                 if browser_target_id
@@ -748,6 +752,8 @@ class ArchiveTaskService:
                     last_url=current_tab.url,
                     owned_by_reader=(binding.owned_by_reader if binding else True),
                 )
+            if artifact.media_type == "application/pdf":
+                return PageArchiveOutcome()
             inspection = await asyncio.to_thread(
                 self.site_rule_registry.inspect,
                 task.url,
@@ -1187,7 +1193,13 @@ class ArchiveTaskService:
         )
         cleaned = selected.removeprefix("ERROR:").strip() or "未下载到视频。"
         cleaned = re.sub(
-            r"([?&](?:access_token|auth|key|poc_token|sig|signature|token)=)[^&\s]+",
+            r"([?&](?:access_token|auth|code|key|poc_token|session|sessionid|sig|signature|token)=)[^&\s]+",
+            r"\1[已隐藏]",
+            cleaned,
+            flags=re.IGNORECASE,
+        )
+        cleaned = re.sub(
+            r"(;jsessionid=)[^?&#\s]+",
             r"\1[已隐藏]",
             cleaned,
             flags=re.IGNORECASE,

@@ -14,6 +14,7 @@ dependencies = [
   "psycopg[binary]>=3.2.0",
   "pyjwt>=2.8.0",
   "python-multipart>=0.0.20",
+  "pypdf>=6.0.0",
   "sqlalchemy>=2.0.36",
   "sqlmodel>=0.0.21",
   "uvicorn[standard]>=0.32.0",
