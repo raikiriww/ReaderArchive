@@ -1,6 +1,7 @@
 import asyncio
 import base64
 import io
+import json
 import os
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -2065,6 +2066,15 @@ output_path.with_suffix(".args").write_text("\\n".join(sys.argv[3:]), encoding="
     assert "--load-deferred-images=false" not in args
     assert "--remove-unused-styles=false" in args
     assert "--remove-alternative-medias=false" in args
+    settings_arg = next(arg for arg in args if arg.startswith("--settings-file="))
+    settings_path = Path(settings_arg.split("=", 1)[1])
+    assert json.loads(settings_path.read_text(encoding="utf-8")) == {
+        "profiles": {
+            "__Default_Settings__": {
+                "passReferrerOnError": True,
+            }
+        }
+    }
 
 
 def test_singlefile_archive_can_use_running_chrome_debug_endpoint(
@@ -2108,6 +2118,7 @@ def test_singlefile_archive_can_use_running_chrome_debug_endpoint(
     assert "--load-deferred-images=false" not in args
     assert "--remove-unused-styles=false" in args
     assert "--remove-alternative-medias=false" in args
+    assert any(arg.startswith("--settings-file=") for arg in args)
     assert not any(arg.startswith("--browser-arg=--user-data-dir=") for arg in args)
     assert not any(arg.startswith("--browser-executable-path=") for arg in args)
 

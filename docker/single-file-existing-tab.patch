@@ -1,79 +1,80 @@
 diff --git a/options.js b/options.js
-index 41499ef..f20d3c0 100644
 --- a/options.js
 +++ b/options.js
-@@ -51,6 +51,8 @@ const OPTION_GROUPS = [
-
+@@ -54,6 +54,9 @@
+ 
  const OPTIONS_INFO = [{
- 	"browser-server": { description: "Server to connect to", type: "string" },
+ 	"browser-server": { description: "Server to connect to", type: "string", alias: "browser-remote-debugging-url" },
 +	"browser-target-id": { description: "Existing browser target to capture", type: "string" },
 +	"browser-skip-navigation": { description: "Capture the current target without navigating", type: "boolean" },
++	"browser-document-file": { description: "Path where the final main document response is copied", type: "string" },
  	"browser-headless": { description: "Run the browser in headless mode", type: "boolean", defaultValue: true },
  	"browser-executable-path": { description: "Path to chrome/chromium executable", type: "string" },
- 	"browser-width": { description: "Width of the browser viewport in pixels", type: "number", defaultValue: 1280 },
+ 	"browser-profile": { description: "Path of the browser profile directory to use, e.g. to save pages requiring a logged-in session (see --create-browser-profile). The directory is copied before starting the browser and is left unmodified.", type: "string" },
 diff --git a/lib/cdp-client.js b/lib/cdp-client.js
-index c54ad58..9bad85f 100644
 --- a/lib/cdp-client.js
 +++ b/lib/cdp-client.js
-@@ -54,8 +54,12 @@ export {
+@@ -21,7 +21,7 @@
+  *   Source.
+  */
+ 
+-/* global setTimeout, clearTimeout, URL, AbortController */
++/* global setTimeout, clearTimeout, URL, AbortController, TextEncoder, TextDecoder, Uint8Array, atob */
+ 
+ import {
+ 	launchBrowser,
+@@ -47,6 +47,7 @@
+ 	arrayBufferToBase64,
+ 	getAlternativeUrl
+ } from "./cdp-client-util.js";
++import { Deno } from "./deno-polyfill.js";
+ 
+ const LOAD_TIMEOUT_ERROR = "ERR_LOAD_TIMEOUT";
+ const CAPTURE_TIMEOUT_ERROR = "ERR_CAPTURE_TIMEOUT";
+@@ -67,6 +68,7 @@
+ const CORS_SAFELISTED_HEADER_VALUE_MAX_LENGTH = 128;
+ const SERVICE_WORKER_TARGET_TYPE = "service_worker";
+ const USER_AGENT_HEADER_NAME = "user-agent";
++const REFERRER_HEADER_NAME = "referer";
+ 
+ let browserOptions, relaunchBrowserPromise;
+ 
+@@ -73,7 +74,10 @@
+ export {
  	initialize,
  	getPageData,
 -	closeBrowser
 +	closeBrowser,
-+	isLifecycleEventForCurrentTopFrame,
 +	captureMainDocument,
-+	getCurrentPdfUrl
++	getCurrentPdfUrl,
++	getFetchHeaders
  };
-
-+let browserApiUrl;
+ 
  async function initialize(singleFileOptions) {
- 	if (singleFileOptions.browserServer) {
- 		options.apiUrl = singleFileOptions.browserServer;
-@@ -76,6 +77,7 @@ async function initialize(singleFileOptions) {
- 		browserOptions.httpProxyServer = singleFileOptions.httpProxyServer;
- 		options.apiUrl = LOCALHOST + (await launchBrowser(browserOptions));
- 	}
-+	browserApiUrl = options.apiUrl;
- }
-
- async function getPageData(options) {
-@@ -89,7 +91,10 @@ async function getPageData(options) {
- 	let targetInfo;
-+	let cdp;
+@@ -106,7 +109,7 @@
+ 	let targetInfo, cdp;
  	try {
  		logData(["Loading page", EMPTY_PAGE_URL], pageContext);
 -		targetInfo = await CDP.createTarget(EMPTY_PAGE_URL);
-+		targetInfo = options.browserTargetId
-+			? await getExistingTarget(options.browserTargetId)
-+			: await CDP.createTarget(EMPTY_PAGE_URL);
--		const cdp = new CDP(targetInfo);
-+		cdp = new CDP(targetInfo);
++		targetInfo = options.browserTargetId ? await getExistingTarget(options.browserTargetId) : await CDP.createTarget(EMPTY_PAGE_URL);
+ 		cdp = new CDP(targetInfo);
  		await setupConsoleLogging(cdp, pageContext);
  		await setupBrowserWindow(cdp, targetInfo.id, pageContext);
-@@ -119,6 +124,9 @@ async function getPageData(options) {
- 	} finally {
- 		logData(["Closing page"], pageContext);
- 		await closeTarget();
-+		if (cdp && cdp.connection && options.browserTargetId) {
-+			cdp.connection.close();
-+		}
- 		logData(["Finishing"], pageContext);
+@@ -168,7 +171,7 @@
  	}
-
-@@ -131,13 +139,26 @@ async function getPageData(options) {
- 	}
-
+ 
  	async function closeTarget() {
 -		if (targetInfo && !options.browserDebug) {
 +		if (targetInfo && !options.browserDebug && !options.browserTargetId) {
- 			await CDP.closeTarget(targetInfo.id);
- 			targetInfo = null;
- 		}
+ 			try {
+ 				await CDP.closeTarget(targetInfo.id);
+ 			} catch {
+@@ -185,6 +188,19 @@
  	}
  }
-
+ 
 +async function getExistingTarget(targetId) {
-+	const response = await fetch(browserApiUrl + "/json/list");
++	const response = await fetch(cdpOptions.apiUrl + "/json/list");
 +	if (!response.ok) {
 +		throw new Error("Unable to list browser targets");
 +	}
@@ -88,190 +89,93 @@ index c54ad58..9bad85f 100644
  async function setupConsoleLogging({ Console }, { options, consoleMessages, debugMessages }) {
  	const CONSOLE_MESSAGE_ADDED_EVENT_TYPE = "messageAdded";
  	if (options.consoleMessagesFile) {
-@@ -366,7 +383,9 @@ async function setupScriptInjection({ Page }, { options }) {
-
- async function getContextId({ Debugger, Page, Runtime }, { options, debugMessages }) {
- 	const [contextId] = await Promise.all([
--		loadPage({ Page, Runtime }, { options, debugMessages }),
-+		options.browserTargetId && options.browserSkipNavigation
-+			? loadCurrentPage({ Page, Runtime }, { options, debugMessages })
-+			: loadPage({ Page, Runtime }, { options, debugMessages }),
- 		options.browserDebug ? waitForDebuggerReady() : Promise.resolve()
- 	]);
- 	return contextId;
-@@ -386,6 +405,31 @@ async function getContextId({ Debugger, Page, Runtime }, { options, debugMessages }) {
- 	}
- }
-
-+async function loadCurrentPage({ Page, Runtime }, { options, debugMessages }) {
-+	await Runtime.enable();
-+	await Page.enable();
-+	try {
-+		logData(["Using current page", options.url], { options, debugMessages });
-+		const { frameTree } = await Page.getFrameTree();
-+		const { executionContextId } = await Page.createIsolatedWorld({
-+			frameId: frameTree.frame.id,
-+			worldName: SINGLE_FILE_WORLD_NAME,
-+			grantUniveralAccess: true
-+		});
-+		const { result } = await Runtime.evaluate({
-+			expression: "typeof singlefile !== 'undefined'",
-+			contextId: executionContextId
-+		});
-+		if (result.value !== true) {
-+			throw new Error("SingleFile was not injected into the existing page");
-+		}
-+		return executionContextId;
-+	} finally {
-+		await Runtime.disable();
-+		await Page.disable();
-+	}
-+}
-+
- async function loadPage({ Page, Runtime }, { options, debugMessages }) {
- 	const LOAD_TIMEOUT_ERROR_MESSAGE = "Load timeout";
- 	await Runtime.enable();
-@@ -432,7 +458,7 @@ async function loadPage({ Page, Runtime }, { options, debugMessages }) {
- 
- async function getTopFrameContextId({ Page, Runtime }, { options, debugMessages }) {
- 	await Page.setLifecycleEventsEnabled({ enabled: true });
--	const state = { topFrameId: undefined, contextIds: [] };
-+	const state = { topFrameId: undefined, topLoaderId: undefined, contextIds: [] };
- 	const removeContextListener = setupContextCreatedListener({ Runtime }, state);
- 	try {
- 		await waitForPageReadyState({ Page }, state, { options, debugMessages });
-@@ -476,10 +502,11 @@ async function waitForPageReadyState({ Page }, state, { options, debugMessages
- 
- function createLifecycleEventHandler(state, timeoutState, resolve, cleanup, { options, debugMessages }) {
- 	return ({ params }) => {
--		const { frameId, name } = params;
--		if (frameId === state.topFrameId) {
--			logData(["Detecting lifecycle event", name], { options, debugMessages });
-+		const { name } = params;
-+		if (!isLifecycleEventForCurrentTopFrame(params, state)) {
-+			return;
- 		}
-+		logData(["Detecting lifecycle event", name], { options, debugMessages });
- 		const shouldResolve = name === options.browserWaitUntil ||
- 			(timeoutState.timeoutId && NETWORK_STATES.indexOf(name) < NETWORK_STATES.indexOf(options.browserWaitUntil));
- 		if (shouldResolve) {
-@@ -510,12 +537,23 @@ function createFrameNavigatedHandler(state, timeoutState, reject, cleanup, { op
- 				reject(new Error(UNREACHABLE_URL_ERROR_MESSAGE + ": " + frame.unreachableUrl));
- 			} else {
- 				logData(["Detecting top frame ID"], { options, debugMessages });
- 				state.topFrameId = frame.id;
-+				state.topLoaderId = frame.loaderId;
-+				state.contextIds = [];
- 			}
- 		}
- 	};
+@@ -275,13 +291,20 @@
+ 	return userAgent.replace(HEADLESS_USER_AGENT_TOKEN, "");
  }
  
-+function isLifecycleEventForCurrentTopFrame(params, state) {
-+	return Boolean(
-+		state.topFrameId &&
-+		state.topLoaderId &&
-+		params.frameId === state.topFrameId &&
-+		params.loaderId === state.topLoaderId
-+	);
-+}
-+
- async function findValidSingleFileContext({ Runtime }, contextIds, { options, debugMessages }) {
- 	const CONTEXT_NOT_FOUND_ERROR_MESSAGE = "Execution context not found for SingleFile world";
- 	const SINGLE_FILE_DETECTION_TEST = "typeof singlefile !== 'undefined'";
---- a/options.js
-+++ b/options.js
-@@ -54,6 +54,7 @@
- 	"browser-server": { description: "Server to connect to", type: "string" },
- 	"browser-target-id": { description: "Existing browser target to capture", type: "string" },
- 	"browser-skip-navigation": { description: "Capture the current target without navigating", type: "boolean" },
-+	"browser-document-file": { description: "Path where the final main document response is copied", type: "string" },
- 	"browser-headless": { description: "Run the browser in headless mode", type: "boolean", defaultValue: true },
- 	"browser-executable-path": { description: "Path to chrome/chromium executable", type: "string" },
- 	"browser-width": { description: "Width of the browser viewport in pixels", type: "number", defaultValue: 1280 },
---- a/lib/cdp-client.js
-+++ b/lib/cdp-client.js
-@@ -21,7 +21,7 @@
-  *   Source.
-  */
- 
--/* global setTimeout, clearTimeout, URL, AbortController */
-+/* global setTimeout, clearTimeout, URL, AbortController, TextEncoder, Uint8Array, atob */
- 
- import {
- 	launchBrowser,
-@@ -45,6 +45,7 @@
- 	arrayBufferToBase64,
- 	getAlternativeUrl
- } from "./cdp-client-util.js";
-+import { Deno } from "./deno-polyfill.js";
- 
- const LOAD_TIMEOUT_ERROR = "ERR_LOAD_TIMEOUT";
- const CAPTURE_TIMEOUT_ERROR = "ERR_CAPTURE_TIMEOUT";
-@@ -237,7 +238,7 @@
- 	await Emulation.setUserAgentOverride(agentOptions);
- }
- 
--async function setupNetworkInterception({ Browser, Emulation, Fetch, Network }, { options, debugMessages, httpInfo }) {
-+async function setupNetworkInterception({ Browser, Emulation, Fetch, Network, Page }, { options, debugMessages, httpInfo }) {
- 	const REQUEST_STAGE = "Request";
- 	const RESPONSE_STAGE = "Response";
- 	const DENY_BEHAVIOR = "deny";
-@@ -249,7 +250,8 @@
+-async function setupNetwork({ Fetch, Network }, { options, debugMessages, httpInfo, blockedURLPatterns }) {
++async function setupNetwork({ Fetch, Network, Page }, { options, debugMessages, httpInfo, blockedURLPatterns }) {
+ 	const { handleAuthRequests, patterns } = getInterceptionOptions(options);
+ 	await Fetch.enable({ handleAuthRequests, patterns });
  	if (handleAuthRequests) {
  		setupProxyAuth({ Fetch }, { options, debugMessages });
  	}
--	setupRequestInterception({ Fetch }, { options, debugMessages, httpInfo });
+-	setupRequestInterception({ Fetch }, { options, debugMessages, httpInfo, blockedURLPatterns });
 +	const { frameTree } = await Page.getFrameTree();
-+	setupRequestInterception({ Fetch }, { options, debugMessages, httpInfo, mainFrameId: frameTree.frame.id });
- 	if (options.httpHeaders) {
++	setupRequestInterception({ Fetch }, {
++		options,
++		debugMessages,
++		httpInfo,
++		blockedURLPatterns,
++		mainFrameId: frameTree.frame.id
++	});
+ 	if (options.httpHeaders && !hasUnsafeHttpHeaders(options)) {
  		await setupHttpHeaders({ Network }, { options, debugMessages });
  	}
-@@ -278,13 +280,14 @@
- 	});
+@@ -342,11 +365,12 @@
+ 	}, { options, debugMessages }));
  }
  
--function setupRequestInterception({ Fetch }, { options, debugMessages, httpInfo }) {
-+function setupRequestInterception({ Fetch }, { options, debugMessages, httpInfo, mainFrameId }) {
+-function setupRequestInterception({ Fetch }, { options, debugMessages, httpInfo, blockedURLPatterns }) {
++function setupRequestInterception({ Fetch }, { options, debugMessages, httpInfo, blockedURLPatterns, mainFrameId }) {
  	const REQUEST_PAUSED_EVENT_TYPE = "requestPaused";
  	const ABORTED_ERROR_REASON = "Aborted";
  	const urlState = { url: options.url, alternativeUrl: getAlternativeUrl(options.url) };
- 	Fetch.addEventListener(REQUEST_PAUSED_EVENT_TYPE, async ({ params }) => {
- 		const { requestId, request } = params;
- 		captureHttpInfo(params, urlState, { options, debugMessages, httpInfo });
-+		await captureMainDocument({ Fetch }, params, mainFrameId, { options, debugMessages });
- 		if (shouldBlockRequest(request.url)) {
- 			try {
- 				await Fetch.failRequest({ requestId, errorReason: ABORTED_ERROR_REASON });
-@@ -312,9 +315,40 @@
+ 	const injectedHeaders = hasUnsafeHttpHeaders(options) ? options.httpHeaders : undefined;
++	const documentCaptureState = { pdfCaptured: false };
+ 	Fetch.addEventListener(REQUEST_PAUSED_EVENT_TYPE, ignoringErrors(async ({ params, sessionId }) => {
+ 		const { requestId, request, responseStatusCode, responseErrorReason } = params;
+ 		// the request pauses twice when both stages are intercepted, and the
+@@ -358,6 +382,7 @@
+ 		try {
+ 			if (!sessionId) {
+ 				captureHttpInfo(params, urlState, { options, debugMessages, httpInfo });
++				await captureMainDocument({ Fetch }, params, mainFrameId, { options, debugMessages }, documentCaptureState);
+ 			}
+ 			blocked = shouldBlockRequest(request.url);
+ 		} catch (error) {
+@@ -386,9 +411,53 @@
  			return true;
  		}
  		return false;
 +	}
 +}
 +
-+async function captureMainDocument({ Fetch }, params, mainFrameId, { options, debugMessages }) {
++async function captureMainDocument({ Fetch }, params, mainFrameId, { options, debugMessages }, captureState = {}) {
 +	const REDIRECT_STATUS_CODES = [301, 302, 303, 307, 308];
 +	const DOCUMENT_RESOURCE_TYPE = "Document";
-+	const { frameId, requestId, resourceType, responseStatusCode } = params;
++	const { frameId, requestId, resourceType, responseHeaders, responseStatusCode } = params;
 +	const shouldCapture = options.browserDocumentFile &&
++		!captureState.pdfCaptured &&
 +		frameId === mainFrameId &&
 +		resourceType === DOCUMENT_RESOURCE_TYPE &&
 +		responseStatusCode !== undefined &&
 +		!REDIRECT_STATUS_CODES.includes(responseStatusCode);
 +	if (!shouldCapture) {
 +		return;
- 	}
++	}
 +	try {
++		const contentType = getResponseHeader(responseHeaders, "content-type");
 +		const { body, base64Encoded } = await Fetch.getResponseBody({ requestId });
 +		const bytes = base64Encoded ? decodeBase64(body) : new TextEncoder().encode(body);
 +		await Deno.writeFile(options.browserDocumentFile, bytes);
++		await Deno.writeTextFile(
++			options.browserDocumentFile + ".json",
++			JSON.stringify({ contentType })
++		);
++		captureState.pdfCaptured = contentType.split(";", 1)[0].trim().toLowerCase() === "application/pdf" ||
++			new TextDecoder().decode(bytes.slice(0, 1024)).includes("%PDF-");
 +		logData(["Copied main document response"], { options, debugMessages });
 +	} catch (error) {
 +		logData(["Unable to copy main document response", error.message], { options, debugMessages });
-+	}
+ 	}
  }
  
++function getResponseHeader(headers = [], name) {
++	const header = headers.find(value => value.name.toLowerCase() === name.toLowerCase());
++	return header ? header.value : "";
++}
++
 +function decodeBase64(value) {
 +	const binary = atob(value);
 +	const bytes = new Uint8Array(binary.length);
@@ -281,83 +185,12 @@ index c54ad58..9bad85f 100644
 +	return bytes;
 +}
 +
- function captureHttpInfo(params, urlState, { options, debugMessages, httpInfo }) {
- 	const REDIRECT_STATUS_CODES = [301, 302, 303, 307, 308];
- 	const DOCUMENT_RESOURCE_TYPE = "Document";
---- a/lib/cdp-client.js
-+++ b/lib/cdp-client.js
-@@ -322,7 +322,7 @@
- async function captureMainDocument({ Fetch }, params, mainFrameId, { options, debugMessages }) {
- 	const REDIRECT_STATUS_CODES = [301, 302, 303, 307, 308];
- 	const DOCUMENT_RESOURCE_TYPE = "Document";
--	const { frameId, requestId, resourceType, responseStatusCode } = params;
-+	const { frameId, requestId, resourceType, responseHeaders, responseStatusCode } = params;
- 	const shouldCapture = options.browserDocumentFile &&
- 		frameId === mainFrameId &&
- 		resourceType === DOCUMENT_RESOURCE_TYPE &&
-@@ -332,6 +332,11 @@
- 		return;
- 	}
- 	try {
-+		const contentType = responseHeaders?.find(header => header.name.toLowerCase() === "content-type")?.value || "";
-+		await Deno.writeTextFile(
-+			options.browserDocumentFile + ".json",
-+			JSON.stringify({ status: responseStatusCode, contentType })
-+		);
- 		const { body, base64Encoded } = await Fetch.getResponseBody({ requestId });
-		const bytes = base64Encoded ? decodeBase64(body) : new TextEncoder().encode(body);
-		await Deno.writeFile(options.browserDocumentFile, bytes);
-
---- a/lib/cdp-client.js
-+++ b/lib/cdp-client.js
-@@ -21,7 +21,7 @@
-  *   Source.
-  */
- 
--/* global setTimeout, clearTimeout, URL, AbortController, TextEncoder, Uint8Array, atob */
-+/* global setTimeout, clearTimeout, URL, AbortController, TextEncoder, TextDecoder, Uint8Array, atob */
- 
- import {
- 	launchBrowser,
-@@ -285,10 +285,11 @@
- 	const REQUEST_PAUSED_EVENT_TYPE = "requestPaused";
- 	const ABORTED_ERROR_REASON = "Aborted";
- 	const urlState = { url: options.url, alternativeUrl: getAlternativeUrl(options.url) };
-+	const documentCaptureState = { pdfCaptured: false };
- 	Fetch.addEventListener(REQUEST_PAUSED_EVENT_TYPE, async ({ params }) => {
- 		const { requestId, request } = params;
- 		captureHttpInfo(params, urlState, { options, debugMessages, httpInfo });
--		await captureMainDocument({ Fetch }, params, mainFrameId, { options, debugMessages });
-+		await captureMainDocument({ Fetch }, params, mainFrameId, { options, debugMessages }, documentCaptureState);
- 		if (shouldBlockRequest(request.url)) {
- 			try {
- 				await Fetch.failRequest({ requestId, errorReason: ABORTED_ERROR_REASON });
-@@ -319,11 +320,12 @@
- 	}
+ // continueRequest replaces the headers of the request instead of adding to them,
+ // so the ones the browser prepared are kept and the extra ones merged into them
+ function getMergedHeaders(requestHeaders, extraHeaders) {
+@@ -539,8 +608,18 @@
  }
  
--async function captureMainDocument({ Fetch }, params, mainFrameId, { options, debugMessages }) {
-+async function captureMainDocument({ Fetch }, params, mainFrameId, { options, debugMessages }, captureState = {}) {
- 	const REDIRECT_STATUS_CODES = [301, 302, 303, 307, 308];
- 	const DOCUMENT_RESOURCE_TYPE = "Document";
- 	const { frameId, requestId, resourceType, responseHeaders, responseStatusCode } = params;
- 	const shouldCapture = options.browserDocumentFile &&
-+		!captureState.pdfCaptured &&
- 		frameId === mainFrameId &&
- 		resourceType === DOCUMENT_RESOURCE_TYPE &&
- 		responseStatusCode !== undefined &&
-@@ -340,6 +342,8 @@
- 		const { body, base64Encoded } = await Fetch.getResponseBody({ requestId });
- 		const bytes = base64Encoded ? decodeBase64(body) : new TextEncoder().encode(body);
- 		await Deno.writeFile(options.browserDocumentFile, bytes);
-+		captureState.pdfCaptured = contentType.split(";", 1)[0].trim().toLowerCase() === "application/pdf" ||
-+			new TextDecoder().decode(bytes.slice(0, 1024)).includes("%PDF-");
- 		logData(["Copied main document response"], { options, debugMessages });
- 	} catch (error) {
- 		logData(["Unable to copy main document response", error.message], { options, debugMessages });
---- a/lib/cdp-client.js
-+++ b/lib/cdp-client.js
-@@ -421,8 +421,16 @@
  async function getContextId({ Debugger, Page, Runtime }, { options, debugMessages }) {
 +	const useCurrentPage = options.browserTargetId && options.browserSkipNavigation;
 +	const currentPdfUrl = useCurrentPage
@@ -368,16 +201,14 @@ index c54ad58..9bad85f 100644
 +		debugMessages
 +	};
  	const [contextId] = await Promise.all([
--		options.browserTargetId && options.browserSkipNavigation
--			? loadCurrentPage({ Page, Runtime }, { options, debugMessages })
--			: loadPage({ Page, Runtime }, { options, debugMessages }),
+-		loadPage({ Page, Runtime }, { options, debugMessages }),
 +		useCurrentPage && !currentPdfUrl
 +			? loadCurrentPage({ Page, Runtime }, pageContext)
 +			: loadPage({ Page, Runtime }, pageContext),
  		options.browserDebug ? waitForDebuggerReady() : Promise.resolve()
  	]);
  	return contextId;
-@@ -445,6 +453,22 @@
+@@ -559,6 +638,35 @@
  	}
  }
  
@@ -397,6 +228,86 @@ index c54ad58..9bad85f 100644
 +	}
 +}
 +
- async function loadCurrentPage({ Page, Runtime }, { options, debugMessages }) {
++async function loadCurrentPage({ Page, Runtime }, { options, debugMessages }) {
++	await Runtime.enable();
++	await Page.enable();
++	try {
++		logData(["Using current page", options.url], { options, debugMessages });
++		const { frameTree } = await Page.getFrameTree();
++		return await getSingleFileContext({ Page, Runtime }, frameTree.frame.id, { options, debugMessages });
++	} finally {
++		await Runtime.disable();
++		await Page.disable();
++	}
++}
++
+ async function loadPage({ Page, Runtime }, { options, debugMessages }) {
+ 	const LOAD_TIMEOUT_ERROR_MESSAGE = "Load timeout";
  	await Runtime.enable();
- 	await Page.enable();
+@@ -790,10 +900,7 @@
+ 		// this fetch runs outside the browser, so without the user agent below it
+ 		// would reach the server under the runtime's own identity while every
+ 		// request the browser made presented another one
+-		const headers = Object.assign({}, fetchOptions.headers, options.httpHeaders);
+-		if (browserInfo.userAgent && !Object.keys(headers).some(name => name.toLowerCase() == USER_AGENT_HEADER_NAME)) {
+-			headers[USER_AGENT_HEADER_NAME] = browserInfo.userAgent;
+-		}
++		const headers = getFetchHeaders(fetchOptions, options, browserInfo);
+ 		const response = await fetch(url, Object.assign({}, fetchOptions, { headers, signal: fetchAbortController.signal }));
+ 		const arrayBuffer = await response.arrayBuffer();
+ 		const base64Data = arrayBufferToBase64(arrayBuffer);
+@@ -812,6 +919,17 @@
+ 	}
+ }
+ 
++function getFetchHeaders(fetchOptions, options, browserInfo) {
++	const headers = Object.assign({}, fetchOptions.headers, options.httpHeaders);
++	if (fetchOptions.referrer && !Object.keys(headers).some(name => name.toLowerCase() == REFERRER_HEADER_NAME)) {
++		headers[REFERRER_HEADER_NAME] = fetchOptions.referrer;
++	}
++	if (browserInfo.userAgent && !Object.keys(headers).some(name => name.toLowerCase() == USER_AGENT_HEADER_NAME)) {
++		headers[USER_AGENT_HEADER_NAME] = browserInfo.userAgent;
++	}
++	return headers;
++}
++
+ async function callBrowserFunction({ Runtime }, contextId, functionName, args, sessionId) {
+ 	const serializedArgs = args.map(arg => JSON.stringify(arg)).join(", ");
+ 	await Runtime.evaluate({
+diff --git a/lib/single-file-script.js b/lib/single-file-script.js
+--- a/lib/single-file-script.js
++++ b/lib/single-file-script.js
+@@ -36,6 +36,7 @@
+ 	FETCH_FUNCTION_NAME,
+ 	RESOLVE_FETCH_FUNCTION_NAME,
+ 	REJECT_FETCH_FUNCTION_NAME,
++	initSingleFile,
+ 	getScriptSource,
+ 	getHookScriptSource,
+ 	getZipScriptSource,
+@@ -77,15 +78,19 @@
+-	window.singlefile.init({
++	globalThis.singlefile.init({
+ 		fetch: async (url, options) => {
+ 			try {
+-				return await nativeFetch(url, options);
++				const response = await nativeFetch(url, options);
++				if (response.status < 400) {
++					return response;
++				}
+ 			} catch {
+-				const requestId = lastRequestId++;
+-				return new Promise((resolve, reject) => {
+-					pendingRequests.set(requestId, { resolve, reject });
+-					globalThis[FETCH_FUNCTION_NAME](JSON.stringify({ requestId, url, options }));
+-				});
++				// Use the out-of-browser fallback below.
+ 			}
++			const requestId = lastRequestId++;
++			return new Promise((resolve, reject) => {
++				pendingRequests.set(requestId, { resolve, reject });
++				globalThis[FETCH_FUNCTION_NAME](JSON.stringify({ requestId, url, options }));
++			});
+ 		}
+ 	});
+ }

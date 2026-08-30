@@ -13,6 +13,8 @@ from urllib.request import Request, urlopen
 
 from app.core.config import Settings
 
+SINGLE_FILE_SETTINGS_PATH = Path(__file__).with_name("single-file-settings.json")
+
 
 class BrowserLoginRequiredError(RuntimeError):
     pass
@@ -359,6 +361,7 @@ class SingleFileArchiver:
             "--remove-unused-styles=false",
             "--remove-alternative-medias=false",
             "--filename-conflict-action=overwrite",
+            f"--settings-file={SINGLE_FILE_SETTINGS_PATH}",
             f"--browser-document-file={output_path.with_name(f'{output_path.stem}.document.tmp')}",
         ]
         if self.settings.browser_remote_debugging_url:

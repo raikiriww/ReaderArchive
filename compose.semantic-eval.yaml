@@ -24,7 +24,7 @@ services:
     build:
       context: .
       args:
-        SINGLE_FILE_CLI_VERSION: ${SINGLE_FILE_CLI_VERSION:-2.0.83}
+        SINGLE_FILE_CLI_VERSION: ${SINGLE_FILE_CLI_VERSION:-2.6.1}
         YT_DLP_VERSION: ${YT_DLP_VERSION:-2026.06.09}
     image: reader/archive-desktop:latest
     platform: linux/amd64
