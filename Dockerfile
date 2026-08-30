@@ -2,7 +2,7 @@ FROM oven/bun:1.3.4-debian AS bun-bin
 
 FROM denoland/deno:2.5.6 AS single-file-build
 
-ARG SINGLE_FILE_CLI_VERSION=2.0.83
+ARG SINGLE_FILE_CLI_VERSION=2.6.1
 
 RUN apt-get update \
   && apt-get install -y --no-install-recommends ca-certificates curl patch \
@@ -18,8 +18,10 @@ COPY docker/single-file-existing-tab.patch /tmp/single-file-existing-tab.patch
 COPY docker/single-file-navigation.test.js /tmp/single-file-navigation.test.js
 
 RUN patch -p1 < /tmp/single-file-existing-tab.patch \
-  && deno test --allow-read --allow-write /tmp/single-file-navigation.test.js \
+  && deno test --node-modules-dir=auto --allow-read --allow-write /tmp/single-file-navigation.test.js \
   && deno compile \
+    --node-modules-dir=auto \
+    --minimum-dependency-age=0 \
     --allow-read \
     --allow-write \
     --allow-net \

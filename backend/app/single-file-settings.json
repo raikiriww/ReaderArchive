@@ -1,0 +1,7 @@
+{
+  "profiles": {
+    "__Default_Settings__": {
+      "passReferrerOnError": true
+    }
+  }
+}

@@ -184,7 +184,7 @@ docker compose -f compose.yaml -f compose.build.yaml up -d
 You can override tool versions while building:
 
 ```bash
-SINGLE_FILE_CLI_VERSION=2.0.83 YT_DLP_VERSION=2026.06.09 \
+SINGLE_FILE_CLI_VERSION=2.6.1 YT_DLP_VERSION=2026.06.09 \
   docker compose -f compose.yaml -f compose.build.yaml build archive-desktop
 ```
 
