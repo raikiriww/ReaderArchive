@@ -14,6 +14,7 @@ from sqlalchemy import case, func, or_, text
 from sqlalchemy import select as sa_select
 from sqlmodel import col, select
 
+from app.archive_formats import FILE_ARCHIVE_SUFFIXES
 from app.lexical_search import LexicalDocument, search_bm25
 from app.models import (
     ArchiveSearchDocument,
@@ -375,13 +376,15 @@ def search_archive(service: ArchiveTaskService, *, query: str, limit: int, offse
         tagged = select(ArchiveTaskTag.task_id).join(ArchiveTag, ArchiveTag.id == ArchiveTaskTag.tag_id).where(
             func.lower(ArchiveTag.name).in_([tag.casefold() for tag in tags]))
         scope = scope.where(col(ArchiveTask.id).in_(tagged))
+    is_file_archive = or_(*(col(ArchiveTask.output_file).ilike('%' + suffix)
+        for suffix in FILE_ARCHIVE_SUFFIXES))
     if content_type == "video":
         scope = scope.where(ArchiveTask.video_file != None)  # noqa: E711
     elif content_type == "file":
-        scope = scope.where(col(ArchiveTask.output_file).ilike('%.pdf'))
+        scope = scope.where(is_file_archive)
     elif content_type == "web":
         scope = scope.where(ArchiveTask.video_file == None,  # noqa: E711
-            or_(ArchiveTask.output_file == None, ~col(ArchiveTask.output_file).ilike('%.pdf')))  # noqa: E711
+            or_(ArchiveTask.output_file == None, ~is_file_archive))  # noqa: E711
 
     with repository._session() as session:
         scoped_tasks = session.execute(sa_select(col(ArchiveTask.id), col(ArchiveTask.url), col(ArchiveTask.status), col(ArchiveTask.output_file), col(ArchiveTask.page_error)).where(

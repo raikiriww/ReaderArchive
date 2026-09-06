@@ -31,6 +31,26 @@ def test_text_chunks_cover_short_tail_and_preserve_paragraphs() -> None:
     assert all(len(chunk) <= 900 for chunk in chunks)
 
 
+def test_plain_text_preserves_angle_brackets_and_removes_utf8_bom(tmp_path) -> None:
+    path = tmp_path / 'article.txt'
+    body = '标题：原始文本\n\n请阅读 <设备驱动程序编写> 和 <系统编程>。\n<script>也是原文，不是网页脚本。</script>'
+    path.write_bytes(b'\xef\xbb\xbf' + body.encode('utf-8'))
+    assert extract_readable_text(path) == body
+
+
+@pytest.mark.parametrize('suffix', ['.jpg', '.PNG', '.webp', '.svg'])
+def test_images_do_not_generate_garbage_search_text(tmp_path, suffix) -> None:
+    path = tmp_path / ('image' + suffix)
+    path.write_bytes(b'\xff\xd8' + b'<html><p>embedded metadata is not article text</p></html>')
+    assert extract_readable_text(path) is None
+
+
+def test_invalid_text_encoding_is_not_silently_corrupted(tmp_path) -> None:
+    path = tmp_path / 'invalid.txt'
+    path.write_bytes(b'\xff\xfe\x00')
+    assert extract_readable_text(path) is None
+
+
 def test_token_chunks_cover_every_character_and_reserve_title_budget() -> None:
     class CharacterTokenizer:
         def encode(self, value):
@@ -104,6 +124,31 @@ def test_keyword_body_is_indexed_without_model_and_read_text_matches(service) ->
     assert page.coverage.ready == 1
     legacy = service.list_tasks(50, query='企鹅栖息地', include_read=True)
     assert legacy.items[0].task_id == 'tail'
+
+
+def test_direct_file_archives_are_not_classified_as_webpages(service) -> None:
+    with Session(service.repository.engine) as session:
+        for name, suffix in [('text', '.txt'), ('image', '.JPG'), ('pdf', '.pdf'), ('web', '.html')]:
+            session.add(ArchiveTask(id=name, url=f'https://example.com/{name}',
+                status='succeeded', output_file=name + suffix, entry_title='迁移验收'))
+        session.commit()
+    assert {x.task_id for x in service.search_tasks('迁移验收', exact=True, content_type='file').items} == {'text', 'image', 'pdf'}
+    assert {x.task_id for x in service.search_tasks('迁移验收', exact=True, content_type='web').items} == {'web'}
+
+
+def test_plain_text_index_keeps_literal_book_titles_and_image_is_skipped(service) -> None:
+    with Session(service.repository.engine) as session:
+        session.add(ArchiveTask(id='txt', url='https://example.com/a.txt', status='succeeded', output_file='txt.txt', entry_title='纯文本'))
+        session.add(ArchiveTask(id='image', url='https://example.com/a.jpg', status='succeeded', output_file='image.jpg', entry_title='长图'))
+        session.commit()
+    (service.archiver.settings.archive_dir / 'txt.txt').write_text('请阅读 <设备驱动程序编写>。\n\n原始内容完整保留。', encoding='utf-8-sig')
+    (service.archiver.settings.archive_dir / 'image.jpg').write_bytes(b'\xff\xd8<p>image metadata</p>')
+    service._index_task_semantics('txt')
+    service._index_task_semantics('image')
+    assert '<设备驱动程序编写>' in '\n\n'.join(service.get_search_text('txt').paragraphs)
+    assert service.search_tasks('设备驱动程序编写', exact=True, content_type='file').items[0].task_id == 'txt'
+    assert service.repository.get_search_document('image').status == 'unavailable'
+    assert service.repository.semantic_index_record('image', service._semantic_model_name(), service._semantic_text_version()).status == 'skipped'
 
 
 def test_filters_apply_before_candidate_limit_and_literal_like_is_escaped(service) -> None:

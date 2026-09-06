@@ -9,6 +9,8 @@ from html.parser import HTMLParser
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from app.archive_formats import IMAGE_ARCHIVE_SUFFIXES
+
 if TYPE_CHECKING:
     from app.core.config import Settings
 
@@ -169,6 +171,13 @@ class SemanticDocumentPreparer:
 
 
 def extract_readable_text(path: Path) -> str | None:
+    if path.suffix.lower() == ".txt":
+        try:
+            return normalize_text(path.read_text(encoding="utf-8-sig")) or None
+        except (OSError, UnicodeError):
+            return None
+    if path.suffix.lower() in IMAGE_ARCHIVE_SUFFIXES:
+        return None
     if path.suffix.lower() == ".pdf":
         return _extract_from_pdf(path)
     try:
