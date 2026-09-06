@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { FormEvent, RefObject } from "react";
-import { Globe, LogOut, Link, Settings } from "lucide-react";
+import { Globe, LogOut, Link, Settings, Search } from "lucide-react";
 import type { AppConfig, User } from "../../types/domain";
 
 interface TopbarProps {
@@ -12,6 +12,8 @@ interface TopbarProps {
   onOpenSettings: () => void;
   onLogout: () => void;
   onDraftConsumed: () => void;
+  onOpenSearch: () => void;
+  searchOpen: boolean;
 }
 
 export function Topbar({
@@ -23,6 +25,8 @@ export function Topbar({
   onOpenSettings,
   onLogout,
   onDraftConsumed,
+  onOpenSearch,
+  searchOpen,
 }: TopbarProps): JSX.Element {
   const [url, setUrl] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -41,6 +45,8 @@ export function Topbar({
     try {
       await onSubmitUrl(nextUrl);
       setUrl("");
+    } catch {
+      // Keep the address available for retry; the caller presents the error.
     } finally {
       setSubmitting(false);
     }
@@ -71,22 +77,23 @@ export function Topbar({
         </button>
       </form>
       <div className="topbar-actions" role="group" aria-label="全局操作">
-        <a className="text-button" href={config.desktop_url} target="_blank" rel="noreferrer">
+        <button className={`text-button search-entry ${searchOpen ? "active" : ""}`} type="button" onClick={onOpenSearch}><Search size={16} /><span>搜索存档</span><kbd>⌘ K</kbd></button>
+        <a className="text-button" aria-label="打开浏览器" title="打开浏览器" href={config.desktop_url} target="_blank" rel="noreferrer">
           <Globe size={15} />
-          打开浏览器
+          <span>打开浏览器</span>
         </a>
-        <button ref={settingsButtonRef} className="text-button" type="button" onClick={onOpenSettings}>
+        <button ref={settingsButtonRef} aria-label="设置" title="设置" className="text-button" type="button" onClick={onOpenSettings}>
           <Settings size={15} />
-          设置
+          <span>设置</span>
         </button>
       </div>
       <div className="account-strip" role="group" aria-label="当前用户">
         <span>
           {currentUser ? (currentUser.role === "admin" ? `${currentUser.username} · 管理员` : currentUser.username) : "读取用户"}
         </span>
-        <button className="text-button" type="button" onClick={onLogout}>
+        <button className="text-button" type="button" aria-label="退出登录" onClick={onLogout}>
           <LogOut size={15} />
-          退出
+          <span>退出</span>
         </button>
       </div>
     </header>

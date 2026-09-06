@@ -16,6 +16,9 @@ node_modules/
 dist/
 frontend/dist/
 data/
+.local_verify/
+.local_eval/
+designs/
 .DS_Store
 *.tsbuildinfo
 tests/

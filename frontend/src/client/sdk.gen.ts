@@ -45,6 +45,12 @@ import type {
   ArchiveTasksCreateArchiveTaskData,
   ArchiveTasksCreateArchiveTaskResponses,
   ArchiveTasksCreateArchiveTaskErrors,
+  ArchiveTasksSearchArchiveTasksData,
+  ArchiveTasksSearchArchiveTasksResponses,
+  ArchiveTasksSearchArchiveTasksErrors,
+  ArchiveTasksReadSearchTextData,
+  ArchiveTasksReadSearchTextResponses,
+  ArchiveTasksReadSearchTextErrors,
   ArchiveTasksListArchiveTagsData,
   ArchiveTasksListArchiveTagsResponses,
   ArchiveTasksDeleteArchiveTaskData,
@@ -457,6 +463,54 @@ export const archiveTasksCreateArchiveTask = <
       "Content-Type": "application/json",
       ...options.headers,
     },
+  });
+};
+
+/**
+ * Search Archive Tasks
+ */
+export const archiveTasksSearchArchiveTasks = <
+  ThrowOnError extends boolean = false,
+>(
+  options?: Options<ArchiveTasksSearchArchiveTasksData, ThrowOnError>,
+) => {
+  return (options?.client ?? _heyApiClient).get<
+    ArchiveTasksSearchArchiveTasksResponses,
+    ArchiveTasksSearchArchiveTasksErrors,
+    ThrowOnError
+  >({
+    security: [
+      {
+        scheme: "bearer",
+        type: "http",
+      },
+    ],
+    url: "/api/v1/archive-search",
+    ...options,
+  });
+};
+
+/**
+ * Read Search Text
+ */
+export const archiveTasksReadSearchText = <
+  ThrowOnError extends boolean = false,
+>(
+  options: Options<ArchiveTasksReadSearchTextData, ThrowOnError>,
+) => {
+  return (options.client ?? _heyApiClient).get<
+    ArchiveTasksReadSearchTextResponses,
+    ArchiveTasksReadSearchTextErrors,
+    ThrowOnError
+  >({
+    security: [
+      {
+        scheme: "bearer",
+        type: "http",
+      },
+    ],
+    url: "/api/v1/archive-search/{task_id}/text",
+    ...options,
   });
 };
 

@@ -1,3 +1,5 @@
+name: reader-semantic-eval
+
 services:
   eval-db:
     image: pgvector/pgvector:0.8.3-pg18-bookworm
@@ -5,7 +7,7 @@ services:
     restart: unless-stopped
     user: "${READER_DESKTOP_PUID:-1000}:${READER_DESKTOP_PGID:-1000}"
     environment:
-      POSTGRES_DB: reader
+      POSTGRES_DB: reader_semantic_eval
       POSTGRES_USER: reader
       POSTGRES_PASSWORD: reader
       PGDATA: /var/lib/postgresql/data/pgdata
@@ -26,7 +28,7 @@ services:
       args:
         SINGLE_FILE_CLI_VERSION: ${SINGLE_FILE_CLI_VERSION:-2.6.1}
         YT_DLP_VERSION: ${YT_DLP_VERSION:-2026.06.09}
-    image: reader/archive-desktop:latest
+    image: reader/archive-desktop:semantic-eval
     platform: linux/amd64
     container_name: reader-eval-archive-desktop
     depends_on:
@@ -42,7 +44,8 @@ services:
       PIXELFLUX_WAYLAND: "false"
       SELKIES_USE_CPU: "true"
       START_DOCKER: "false"
-      READER_DATABASE_URL: postgresql+psycopg://reader:reader@eval-db:5432/reader
+      READER_DATABASE_URL: postgresql+psycopg://reader:reader@eval-db:5432/reader_semantic_eval
+      READER_EVAL_ALLOW_RESET: isolated-semantic-eval
       READER_ARCHIVE_DIR: /app/eval-data/archive
       READER_BROWSER_PROFILE_DIR: /config/.config/reader-archive-profile
       READER_BROWSER_REMOTE_DEBUGGING_URL: ${READER_BROWSER_REMOTE_DEBUGGING_URL:-http://127.0.0.1:9222}
@@ -70,6 +73,6 @@ services:
       - ./.local_eval/reader-semantic/data/archive:/config/Downloads
       - ./.local_eval/reader-semantic/results:/app/eval-results
     ports:
-      - "38166:8000"
+      - "127.0.0.1:38166:8000"
     shm_size: "1gb"
     restart: unless-stopped

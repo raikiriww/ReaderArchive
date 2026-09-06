@@ -21,6 +21,7 @@ from app.models import (
     AppSetting,
     ArchiveBrowserTabBinding,
     ArchiveFile,
+    ArchiveSearchDocument,
     ArchiveSemanticChunk,
     ArchiveSemanticIndex,
     ArchiveTag,
@@ -470,6 +471,49 @@ class ArchiveTaskRepository:
             total = len(selected)
             return [task for task, _lexical_score in selected[offset : offset + limit]], total
 
+    def save_search_document(
+        self, task_id: str, file_name: str, content: str,
+        status: str = "ready", reason: str | None = None,
+    ) -> None:
+        with self._session() as session:
+            document = session.get(ArchiveSearchDocument, task_id)
+            content_changed = document is not None and document.document_hash != self._hash_text(content)
+            if document is None:
+                document = ArchiveSearchDocument(task_id=task_id, file_name=file_name,
+                    content=content, document_hash=self._hash_text(content))
+            document.file_name = file_name
+            document.content = content
+            document.document_hash = self._hash_text(content)
+            document.status = status
+            document.reason = reason
+            document.text_version = "readable-v3"
+            document.updated_at = utc_now()
+            session.add(document)
+            if content_changed:
+                # Keep old vectors on disk for replacement, but never retrieve
+                # evidence from the previous body while new text is available.
+                for index in session.exec(select(ArchiveSemanticIndex).where(
+                        ArchiveSemanticIndex.task_id == task_id)).all():
+                    index.status = "indexing"
+                    index.updated_at = utc_now()
+                    session.add(index)
+            session.commit()
+
+    def get_search_document(self, task_id: str) -> ArchiveSearchDocument | None:
+        with self._session() as session:
+            return session.get(ArchiveSearchDocument, task_id)
+
+    def list_task_ids_requiring_search_document(self) -> list[str]:
+        with self._session() as session:
+            return list(session.exec(select(ArchiveTask.id).outerjoin(
+                ArchiveSearchDocument, ArchiveSearchDocument.task_id == ArchiveTask.id
+            ).where(
+                ArchiveTask.status == "succeeded", ArchiveTask.output_file != None,  # noqa: E711
+                ArchiveTask.page_error == None,  # noqa: E711
+                (ArchiveSearchDocument.task_id == None) |  # noqa: E711
+                (ArchiveSearchDocument.text_version != "readable-v3")
+            )).all())
+
     def list_task_ids_requiring_semantic_index(
         self,
         model_name: str,
@@ -491,7 +535,7 @@ class ArchiveTaskRepository:
                         AND task.page_error IS NULL
                         AND (
                             semantic_index.id IS NULL
-                            OR semantic_index.status != 'indexed'
+                            OR semantic_index.status IN ('failed', 'indexing')
                             OR semantic_index.embedding_dimensions != :embedding_dimensions
                         )
                     ORDER BY task.created_at DESC
@@ -693,118 +737,6 @@ class ArchiveTaskRepository:
             ).first()
             return str(row) if row else None
 
-    def search_semantic_chunks(
-        self,
-        query_embedding: list[float],
-        model_name: str,
-        limit: int,
-        min_score: float,
-    ) -> dict[str, SemanticSearchMatch]:
-        if not query_embedding:
-            return {}
-        with self._session() as session:
-            session.execute(text("SET LOCAL hnsw.ef_search = 100"))
-            rows = session.execute(
-                text(
-                    """
-                    SELECT task_id, content, 1 - (embedding <=> CAST(:embedding AS vector)) AS score
-                    FROM reader_archive_semantic_chunks
-                    WHERE model_name = :model_name
-                        AND 1 - (embedding <=> CAST(:embedding AS vector)) >= :min_score
-                    ORDER BY embedding <=> CAST(:embedding AS vector)
-                    LIMIT :limit
-                    """
-                ),
-                {
-                    "embedding": self._vector_literal(query_embedding),
-                    "model_name": model_name,
-                    "limit": limit,
-                    "min_score": min_score,
-                },
-            ).all()
-        matches: dict[str, SemanticSearchMatch] = {}
-        for task_id, content, score in rows:
-            task_key = str(task_id)
-            score_value = float(score)
-            existing = matches.get(task_key)
-            if existing is not None and existing.score >= score_value:
-                continue
-            matches[task_key] = SemanticSearchMatch(
-                task_id=task_key,
-                excerpt=self._excerpt(str(content)),
-                score=score_value,
-            )
-        return matches
-
-    def search_semantic_chunk_text(
-        self,
-        query: str,
-        model_name: str,
-        limit: int,
-    ) -> dict[str, SemanticSearchMatch]:
-        cleaned_query = " ".join(query.split())
-        if not cleaned_query:
-            return {}
-        exact_pattern = f"%{self._escape_like(cleaned_query)}%"
-        term_patterns = [
-            f"%{self._escape_like(term)}%" for term in self._search_terms(cleaned_query)
-        ]
-        with self._session() as session:
-            rows = list(
-                session.execute(
-                    text(
-                        r"""
-                    SELECT task_id, content
-                    FROM reader_archive_semantic_chunks
-                    WHERE model_name = :model_name
-                        AND content ILIKE :pattern ESCAPE '\'
-                    ORDER BY updated_at DESC
-                    LIMIT :limit
-                    """
-                    ),
-                    {
-                        "model_name": model_name,
-                        "pattern": exact_pattern,
-                        "limit": limit,
-                    },
-                ).all()
-            )
-            if term_patterns:
-                for pattern in term_patterns:
-                    rows.extend(
-                        session.execute(
-                            text(
-                                r"""
-                                SELECT task_id, content
-                                FROM reader_archive_semantic_chunks
-                                WHERE model_name = :model_name
-                                    AND content ILIKE :pattern ESCAPE '\'
-                                ORDER BY updated_at DESC
-                                LIMIT :limit
-                                """
-                            ),
-                            {
-                                "model_name": model_name,
-                                "pattern": pattern,
-                                "limit": limit,
-                            },
-                        ).all()
-                    )
-        matches: dict[str, SemanticSearchMatch] = {}
-        for task_id, content in rows:
-            task_key = str(task_id)
-            score = self._text_match_score(cleaned_query, str(content))
-            if score <= 0:
-                continue
-            existing = matches.get(task_key)
-            if existing is not None and existing.score >= score:
-                continue
-            matches[task_key] = SemanticSearchMatch(
-                task_id=task_key,
-                excerpt=self._excerpt(str(content)),
-                score=score,
-            )
-        return matches
 
     def list_tags(self) -> list[dict[str, str | int]]:
         with self._session() as session:
@@ -851,6 +783,7 @@ class ArchiveTaskRepository:
             session.exec(
                 delete(ArchiveSemanticIndex).where(ArchiveSemanticIndex.task_id == task_id)
             )
+            session.exec(delete(ArchiveSearchDocument).where(ArchiveSearchDocument.task_id == task_id))
             session.exec(delete(ArchiveFile).where(ArchiveFile.task_id == task_id))
             session.exec(
                 delete(ArchiveBrowserTabBinding).where(ArchiveBrowserTabBinding.task_id == task_id)
@@ -993,6 +926,7 @@ class ArchiveTaskRepository:
             session.exec(
                 delete(ArchiveSemanticIndex).where(ArchiveSemanticIndex.task_id == task_id)
             )
+            session.exec(delete(ArchiveSearchDocument).where(ArchiveSearchDocument.task_id == task_id))
             session.exec(delete(ArchiveFile).where(ArchiveFile.task_id == task_id))
             session.exec(
                 delete(ArchiveBrowserTabBinding).where(ArchiveBrowserTabBinding.task_id == task_id)
@@ -1571,44 +1505,6 @@ class ArchiveTaskRepository:
 
     def _escape_like(self, value: str) -> str:
         return value.replace("\\", "\\\\").replace("%", r"\%").replace("_", r"\_")
-
-    def _search_terms(self, value: str) -> list[str]:
-        import re
-
-        compact = re.sub(r"\s+", "", value.casefold())
-        terms: list[str] = []
-        if re.search(r"[\u4e00-\u9fff]", compact):
-            terms.extend(compact[index : index + 2] for index in range(0, max(0, len(compact) - 1)))
-        terms.extend(part for part in re.split(r"[^a-z0-9]+", value.casefold()) if len(part) >= 3)
-        seen: set[str] = set()
-        result: list[str] = []
-        for term in terms:
-            if term in seen:
-                continue
-            seen.add(term)
-            result.append(term)
-        return result[:16]
-
-    def _text_match_score(self, query: str, content: str) -> float:
-        lowered = content.casefold()
-        if query.casefold() in lowered:
-            return 0.98
-        terms = self._search_terms(query)
-        if not terms:
-            return 0.0
-        hits = sum(1 for term in terms if term in lowered)
-        if hits == 0:
-            return 0.0
-        coverage = hits / len(terms)
-        if coverage < 0.45:
-            return 0.0
-        return min(0.94, 0.7 + coverage * 0.24)
-
-    def _excerpt(self, value: str) -> str:
-        cleaned = " ".join(value.split())
-        if len(cleaned) <= 220:
-            return cleaned
-        return f"{cleaned[:220].rstrip()}..."
 
     def _title_from_url(self, value: str) -> str:
         parsed = urlparse(value)

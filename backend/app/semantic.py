@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import hashlib
 import re
+import threading
+import time
 from dataclasses import dataclass
 from html.parser import HTMLParser
 from pathlib import Path
@@ -24,6 +26,9 @@ class LocalEmbeddingProvider:
         self._model = None
         self._available = settings.semantic_search_enabled
         self._last_error: str | None = None
+        self._failed_at = 0.0
+        self._lock = threading.RLock()
+        self._query_cache: dict[str, tuple[float, ...]] = {}
 
     @property
     def model_name(self) -> str:
@@ -31,7 +36,7 @@ class LocalEmbeddingProvider:
 
     @property
     def available(self) -> bool:
-        return self._available
+        return self.settings.semantic_search_enabled and (self._available or time.monotonic() - self._failed_at >= 60)
 
     @property
     def last_error(self) -> str | None:
@@ -42,25 +47,67 @@ class LocalEmbeddingProvider:
         return self.settings.semantic_embedding_dimensions
 
     def preload(self) -> None:
-        if not self._available:
+        if not self.available:
             return
-        self._load_model()
+        with self._lock:
+            self._load_model()
+            self._available = True
+            self._last_error = None
 
     def embed(self, texts: list[str]) -> list[list[float]]:
-        if not texts or not self._available:
+        if not texts or not self.available:
             return []
         try:
-            model = self._load_model()
-            vectors = model.embed(texts)
-            result = [[float(value) for value in vector] for vector in vectors]
+            with self._lock:
+                model = self._load_model()
+                vectors = model.embed(texts)
+                result = [[float(value) for value in vector] for vector in vectors]
             for vector in result:
                 self.validate_dimensions(vector)
             self._last_error = None
+            self._available = True
             return result
         except Exception as exc:
             self._last_error = str(exc)
             self._available = False
+            self._failed_at = time.monotonic()
             raise
+
+    def embed_query(self, query: str) -> tuple[float, ...]:
+        cached = self._query_cache.get(query)
+        if cached is not None:
+            return cached
+        if not self._lock.acquire(timeout=max(0, self.settings.semantic_query_lock_timeout_seconds)):
+            raise RuntimeError("Semantic search is busy; keyword results remain available.")
+        try:
+            if self._model is None:
+                raise RuntimeError("Semantic model is preparing; keyword results remain available.")
+            if query in self._query_cache:
+                return self._query_cache[query]
+            embeddings = self.embed([query])
+            if len(embeddings) != 1:
+                raise RuntimeError("Query embedding was not generated.")
+            if len(self._query_cache) >= 128:
+                self._query_cache.pop(next(iter(self._query_cache)))
+            result = tuple(embeddings[0])
+            self._query_cache[query] = result
+            return result
+        finally:
+            self._lock.release()
+
+    def prepare_embedding_chunks(self, title: str, text: str) -> tuple[list[str], list[str]]:
+        from tokenizers import Tokenizer
+
+        with self._lock:
+            model = self._load_model()
+            original = model.model.tokenizer
+            if original is None or not original.truncation:
+                raise RuntimeError("The embedding tokenizer must declare its input limit.")
+            budget = int(original.truncation["max_length"])
+            tokenizer = Tokenizer.from_str(original.to_str())
+        tokenizer.no_truncation()
+        tokenizer.no_padding()
+        return token_budget_chunks(text, title, tokenizer, budget)
 
     def validate_dimensions(self, vector: list[float]) -> None:
         actual = len(vector)
@@ -76,21 +123,18 @@ class LocalEmbeddingProvider:
             from fastembed import TextEmbedding
 
             self.settings.semantic_model_dir.mkdir(parents=True, exist_ok=True)
-            try:
-                self._model = TextEmbedding(
-                    model_name=self.settings.semantic_model_name,
-                    cache_dir=str(self.settings.semantic_model_dir),
-                    local_files_only=True,
-                )
-            except TypeError:
-                self._model = TextEmbedding(
-                    model_name=self.settings.semantic_model_name,
-                    cache_dir=str(self.settings.semantic_model_dir),
-                )
+            self._model = TextEmbedding(
+                model_name=self.settings.semantic_model_name,
+                cache_dir=str(self.settings.semantic_model_dir),
+                threads=self.settings.semantic_threads,
+                providers=["CPUExecutionProvider"],
+                local_files_only=True,
+            )
             return self._model
         except Exception as exc:
             self._last_error = str(exc)
             self._available = False
+            self._failed_at = time.monotonic()
             raise
 
 
@@ -161,42 +205,32 @@ def chunk_text(
     max_chars: int,
     overlap_chars: int,
 ) -> list[str]:
-    paragraphs = [part for part in re.split(r"\n{2,}", text) if part.strip()]
-    pieces: list[str] = []
-    for paragraph in paragraphs:
-        cleaned = normalize_text(paragraph)
-        if not cleaned:
-            continue
-        if len(cleaned) <= max_chars:
-            pieces.append(cleaned)
-            continue
-        pieces.extend(_split_long_text(cleaned, max_chars=max_chars))
-
+    # Work on contiguous ranges: no minimum-size rule may discard a document tail.
+    # min_chars is a preference retained for configuration compatibility.
+    if max_chars < 1:
+        raise ValueError("max_chars must be positive")
+    overlap = max(0, min(overlap_chars, max_chars - 1))
+    value = normalize_text(text)
     chunks: list[str] = []
-    current = ""
-    for piece in pieces:
-        candidate = f"{current}\n\n{piece}".strip() if current else piece
-        if len(candidate) <= max_chars:
-            current = candidate
-            continue
-        if len(current) >= min_chars:
-            chunks.append(current)
-            current = _overlap_suffix(current, overlap_chars)
-            candidate = f"{current}\n\n{piece}".strip() if current else piece
-            current = candidate if len(candidate) <= max_chars else piece[:max_chars]
-        else:
-            chunks.append(candidate[:max_chars])
-            current = candidate[max_chars - overlap_chars :]
-    if len(current) >= min_chars:
-        chunks.append(current)
-    elif current and not chunks:
-        chunks.append(current)
-    return [chunk for chunk in chunks if chunk.strip()]
+    start = 0
+    while start < len(value):
+        end = min(len(value), start + max_chars)
+        if end < len(value):
+            boundaries = list(re.finditer(r"\n\n|[。！？.!?](?:\s|(?=[^\x00-\x7f]))", value[start:end]))
+            if boundaries and boundaries[-1].end() >= max(min_chars, max_chars // 2):
+                end = start + boundaries[-1].end()
+        chunk = value[start:end].strip()
+        if chunk:
+            chunks.append(chunk)
+        if end == len(value):
+            break
+        start = max(start + 1, end - overlap)
+    return chunks
 
 
 def normalize_text(value: str) -> str:
     lines = [" ".join(line.split()) for line in value.splitlines()]
-    text = "\n".join(line for line in lines if line)
+    text = "\n".join(lines)
     text = re.sub(r"\n{3,}", "\n\n", text)
     return text.strip()
 
@@ -223,6 +257,9 @@ def _extract_with_trafilatura(html: str) -> str | None:
             include_images=False,
             include_links=False,
             favor_recall=True,
+            # Saved pages may keep application state/recommendations in
+            # noscript or template elements. Those are not article prose.
+            prune_xpath=['//script', '//style', '//noscript', '//template', '//svg', '//canvas'],
         )
     except Exception:
         return None
@@ -271,7 +308,7 @@ def _overlap_suffix(text: str, overlap_chars: int) -> str:
 
 
 class _ReadableTextParser(HTMLParser):
-    skip_tags = {"script", "style", "noscript", "svg", "canvas", "template"}
+    skip_tags = {"script", "style", "noscript", "svg", "canvas", "template", "nav", "footer"}
     block_tags = {
         "article",
         "aside",
@@ -328,5 +365,39 @@ class _ReadableTextParser(HTMLParser):
         if self._skip_depth:
             return
         cleaned = " ".join(data.split())
-        if len(cleaned) >= 2:
+        if cleaned:
             self.parts.append(cleaned)
+
+
+def token_budget_chunks(text: str, title: str, tokenizer, budget: int) -> tuple[list[str], list[str]]:
+    """Cover source characters while measuring the exact title + body model input."""
+    def size(value: str) -> int:
+        return len(tokenizer.encode(value).ids)
+
+    clean_title = normalize_text(title)
+    while clean_title and size(clean_title) > max(4, budget // 4):
+        clean_title = clean_title[:max(0, len(clean_title) * 3 // 4)]
+    prefix = f"{clean_title}\n\n" if clean_title else ""
+    chunks: list[str] = []
+    inputs: list[str] = []
+    start = 0
+    while start < len(text):
+        low, high = start + 1, min(len(text), start + budget * 12)
+        best = start
+        while low <= high:
+            end = (low + high) // 2
+            if size(prefix + text[start:end]) <= budget:
+                best = end
+                low = end + 1
+            else:
+                high = end - 1
+        if best == start:
+            raise ValueError("Embedding input budget cannot fit one source character.")
+        chunk = text[start:best]
+        chunks.append(chunk)
+        inputs.append(prefix + chunk)
+        if best == len(text):
+            break
+        # Small overlap retains phrases at boundaries without hiding any tail.
+        start = max(start + 1, best - min(16, (best - start) // 5))
+    return chunks, inputs

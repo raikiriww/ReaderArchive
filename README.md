@@ -23,10 +23,48 @@ It packages a web app, an API service, PostgreSQL, SingleFile, yt-dlp, and a bro
 - Save web pages as local archives.
 - Download public videos when yt-dlp supports the source.
 - Add RSS feeds and archive new articles automatically.
-- Search saved items by title, source, tag, status, and semantic meaning.
+- Search all saved items by title, original text, tags, URL, or a description; narrow by type, source, date, and read state.
 - Manage saved files attached to each archived item.
 - Open a protected browser desktop for sites that need manual login.
 - Keep archive files and browser data in local folders for backup.
+
+## Finding saved content
+
+The address field at the top still saves a page directly. Choose **搜索存档**
+or press **Cmd/Ctrl+K** to search without interrupting a save. Search includes
+read items by default; filters make the current scope explicit.
+
+Results show the actual matching text. Open a preview, read the extracted
+original text at the match, or open the original archive with its images and
+layout. Returning to results preserves your place. Identical saved URLs are
+grouped with links to their available versions; URLs with different query
+parameters remain separate.
+
+Choose **只匹配原词** to require the entered words, or put an exact phrase in
+quotes. Content found only by similar meaning is labeled separately and may
+not answer the question. Recent searches stay in the current browser session
+and can be cleared.
+
+Full-text keyword search remains available when the local model is disabled,
+starting, or busy. Existing archives are prepared in the background after an
+upgrade. The page reports missing or pending text; scanned PDFs and videos
+without extracted text do not gain OCR or transcript search through this update.
+The default upgrade uses the existing database and does not require new Compose
+settings.
+
+The default CPU search combines Chinese/English keyword matching with
+Qwen3-Embedding-0.6B and BGE-reranker-v2-m3. No dedicated GPU is required.
+Models are included in the image; the first upgrade rebuilds search data in
+the background while keyword search stays available. Explicit legacy MiniLM
+configurations retain their model directory and index version. Allow additional
+memory for the two models; actual local verification used about 5 GiB for the
+application process, and startup on other CPU paths can use more.
+
+Implementation and measured limits are recorded in
+[the backend upgrade notes](docs/search-backend-upgrade.md) and
+[the search evaluation](docs/search-upgrade-evaluation.md).
+CPU model selection and final verification are recorded in
+[the CPU upgrade notes](docs/search-cpu-upgrade.md).
 
 ## Requirements
 

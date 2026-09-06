@@ -1,9 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-COMPOSE_FILE="${READER_SEMANTIC_EVAL_COMPOSE_FILE:-compose.semantic-eval.yaml}"
-SERVICE="${READER_SEMANTIC_EVAL_SERVICE:-eval-archive-desktop}"
-DB_SERVICE="${READER_SEMANTIC_EVAL_DB_SERVICE:-eval-db}"
+# Keep the destructive fixture seed tied to this dedicated project and services.
+# Run from any directory without accidentally resolving a production compose file.
+REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$REPO_DIR"
+COMPOSE_FILE="$REPO_DIR/compose.semantic-eval.yaml"
+SERVICE="eval-archive-desktop"
+DB_SERVICE="eval-db"
 BASE_URL="${READER_SEMANTIC_EVAL_BASE_URL:-http://127.0.0.1:8000}"
 HEALTH_URL="${BASE_URL%/}/api/v1/health"
 
@@ -15,16 +19,16 @@ mkdir -p \
   .local_eval/reader-semantic/results
 
 echo "==> Building semantic evaluation image"
-docker compose -f "$COMPOSE_FILE" build "$SERVICE"
+docker compose -p reader-semantic-eval -f "$COMPOSE_FILE" build "$SERVICE"
 
 echo "==> Starting semantic evaluation database"
-docker compose -f "$COMPOSE_FILE" up -d "$DB_SERVICE"
+docker compose -p reader-semantic-eval -f "$COMPOSE_FILE" up -d "$DB_SERVICE"
 
 echo "==> Ensuring semantic evaluation database exists"
 for attempt in $(seq 1 30); do
-  if docker compose -f "$COMPOSE_FILE" exec -T "$DB_SERVICE" pg_isready -U reader >/dev/null; then
-    docker compose -f "$COMPOSE_FILE" exec -T "$DB_SERVICE" \
-      sh -lc "createdb -U reader reader 2>/dev/null || true"
+  if docker compose -p reader-semantic-eval -f "$COMPOSE_FILE" exec -T "$DB_SERVICE" pg_isready -U reader -d reader_semantic_eval >/dev/null; then
+    docker compose -p reader-semantic-eval -f "$COMPOSE_FILE" exec -T "$DB_SERVICE" \
+      sh -lc "createdb -U reader reader_semantic_eval 2>/dev/null || true"
     break
   fi
   if [ "$attempt" -eq 30 ]; then
@@ -35,18 +39,18 @@ for attempt in $(seq 1 30); do
 done
 
 echo "==> Stopping semantic evaluation service before seeding"
-docker compose -f "$COMPOSE_FILE" stop "$SERVICE" >/dev/null 2>&1 || true
+docker compose -p reader-semantic-eval -f "$COMPOSE_FILE" stop "$SERVICE" >/dev/null 2>&1 || true
 
 echo "==> Migrating and seeding semantic evaluation data"
-docker compose -f "$COMPOSE_FILE" run --rm --no-deps --entrypoint bash "$SERVICE" \
+docker compose -p reader-semantic-eval -f "$COMPOSE_FILE" run --rm --no-deps --entrypoint bash "$SERVICE" \
   -lc "cd /app/backend && /app/backend/.venv/bin/alembic upgrade head && /app/backend/.venv/bin/python -m scripts.semantic_eval seed"
 
 echo "==> Starting semantic evaluation service"
-docker compose -f "$COMPOSE_FILE" up -d "$SERVICE"
+docker compose -p reader-semantic-eval -f "$COMPOSE_FILE" up -d "$SERVICE"
 
 echo "==> Waiting for semantic evaluation API health"
 for attempt in $(seq 1 60); do
-  if docker compose -f "$COMPOSE_FILE" exec -T "$SERVICE" curl -fsS "$HEALTH_URL" >/dev/null; then
+  if docker compose -p reader-semantic-eval -f "$COMPOSE_FILE" exec -T "$SERVICE" curl -fsS "$HEALTH_URL" >/dev/null; then
     break
   fi
   if [ "$attempt" -eq 60 ]; then
@@ -57,12 +61,13 @@ for attempt in $(seq 1 60); do
 done
 
 echo "==> Running semantic evaluation queries"
-docker compose -f "$COMPOSE_FILE" exec -T "$SERVICE" \
+docker compose -p reader-semantic-eval -f "$COMPOSE_FILE" exec -T "$SERVICE" \
   env READER_EVAL_BASE_URL="$BASE_URL" \
       READER_EVAL_RESULTS_DIR=/app/eval-results \
+      READER_EVAL_SEARCH_ENDPOINT="${READER_EVAL_SEARCH_ENDPOINT:-/api/v1/archive-search}" \
       READER_EVAL_USERNAME=admin \
       READER_EVAL_PASSWORD=change-me \
-  bash -lc "cd /app/backend && /app/backend/.venv/bin/python -m scripts.semantic_eval run"
+  bash -lc "cd /app/backend && /app/backend/.venv/bin/python -m scripts.semantic_eval run --fail-on-regression"
 
 echo "==> Semantic evaluation finished"
 echo "==> Report: .local_eval/reader-semantic/results/semantic-eval.md"

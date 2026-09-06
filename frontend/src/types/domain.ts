@@ -20,7 +20,7 @@ export type { ArchiveTaskResult, ArchiveTaskCreated, RssFeedRefreshResult };
 
 export type ArchiveTask = Omit<
   ArchiveTaskRead,
-  "current_step" | "finished_at" | "is_read" | "source_type" | "started_at" | "status" | "tags"
+  "current_step" | "finished_at" | "is_read" | "source_type" | "started_at" | "status" | "tags" | "search_match"
 > & {
   status: ArchiveTaskStatus;
   is_read: boolean;

@@ -32,6 +32,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Free disk space for bundled search models
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android
+          df -h /
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -71,7 +76,7 @@ jobs:
 
       - name: Stop verification containers
         if: always()
-        run: docker compose -f compose.yaml -f compose.build.yaml down -v
+        run: docker compose -p reader_verify -f compose.yaml -f compose.build.yaml down -v
 
       - name: Log in to GHCR
         if: startsWith(github.ref, 'refs/tags/v')

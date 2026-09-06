@@ -7,15 +7,12 @@ import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from time import sleep
-from uuid import uuid4
 
-import psycopg
 import pytest
+from database_support import make_database_url
 from fastapi.testclient import TestClient
-from psycopg import sql
 from pypdf import PdfWriter
 from sqlalchemy import text
-from sqlalchemy.engine import make_url
 from sqlmodel import Session
 
 from app.archiver import BrowserLoginRequiredError, YtDlpDownloader
@@ -25,40 +22,10 @@ from app.main import create_app
 from app.rss import ParsedFeed, ParsedFeedEntry, rss_entry_key
 from app.semantic import SemanticDocumentPreparer
 
-CREATED_DATABASES: list[tuple[str, str]] = []
-
 
 @pytest.fixture(autouse=True)
 def isolate_browser_remote_debugging_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("READER_BROWSER_REMOTE_DEBUGGING_URL", raising=False)
-
-
-def make_database_url() -> str:
-    base_url = make_url(
-        os.environ.get("READER_TEST_DATABASE_URL")
-        or os.environ.get("READER_DATABASE_URL")
-        or "postgresql+psycopg://reader:reader@db:5432/reader"
-    )
-    database_name = f"reader_test_{uuid4().hex}"
-    admin_url = base_url.set(drivername="postgresql", database="postgres")
-    with psycopg.connect(admin_url.render_as_string(hide_password=False), autocommit=True) as connection:
-        connection.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(database_name)))
-    CREATED_DATABASES.append((admin_url.render_as_string(hide_password=False), database_name))
-    return base_url.set(database=database_name).render_as_string(hide_password=False)
-
-
-def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
-    get_engine.cache_clear()
-    for admin_url, database_name in CREATED_DATABASES:
-        try:
-            with psycopg.connect(admin_url, autocommit=True) as connection:
-                connection.execute(
-                    sql.SQL("DROP DATABASE IF EXISTS {} WITH (FORCE)").format(
-                        sql.Identifier(database_name)
-                    )
-                )
-        except Exception:
-            pass
 
 
 def wait_for_finished(client: TestClient, task_id: str) -> dict:
@@ -2278,6 +2245,8 @@ def test_auth_required_for_app_api_and_browser_proxy(
         assert page_response.status_code == 307
         assert page_response.headers["location"].startswith("/login")
         assert api_response.status_code == 401
+        assert client.get("/api/v1/archive-search?q=private").status_code == 401
+        assert client.get("/api/v1/archive-search/private/text").status_code == 401
         assert browser_response.status_code == 307
         assert browser_response.headers["location"].startswith("/login")
 

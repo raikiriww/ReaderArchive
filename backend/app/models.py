@@ -119,6 +119,22 @@ class ArchiveFile(SQLModel, table=True):
     updated_at: datetime = Field(default_factory=utc_now)
 
 
+class ArchiveSearchDocument(SQLModel, table=True):
+    """Readable text is useful even when the optional embedding model is unavailable."""
+
+    __tablename__ = "reader_archive_search_documents"
+
+    task_id: str = Field(sa_column=Column(String, ForeignKey(
+        "reader_archive_tasks.id", ondelete="CASCADE"), primary_key=True))
+    file_name: str
+    content: str
+    document_hash: str
+    text_version: str = "readable-v3"
+    status: str = "ready"
+    reason: str | None = None
+    updated_at: datetime = Field(default_factory=utc_now)
+
+
 class ArchiveSemanticChunk(SQLModel, table=True):
     __tablename__ = "reader_archive_semantic_chunks"
     __table_args__ = (UniqueConstraint("task_id", "model_name", "chunk_index"),)
@@ -276,9 +292,23 @@ class ArchiveTaskResult(BaseModel):
     page_error: str | None = None
 
 
+class SearchHighlight(BaseModel):
+    start: int
+    end: int
+
+
 class ArchiveTaskSearchMatch(BaseModel):
     excerpt: str
     score: float
+    kind: str = "semantic"
+    strength: str = "possible"
+    highlights: list[SearchHighlight] = PydanticField(default_factory=list)
+    file_name: str | None = None
+    paragraph_index: int | None = None
+    paragraph_highlights: list[SearchHighlight] = PydanticField(default_factory=list)
+    location_text: str | None = None
+    version_count: int = 1
+    version_task_ids: list[str] = PydanticField(default_factory=list)
 
 
 class SemanticHealthRead(BaseModel):
@@ -342,6 +372,25 @@ class ArchiveTaskListRead(BaseModel):
     limit: int
     offset: int = 0
     has_more: bool
+
+
+class SearchCoverage(BaseModel):
+    total: int = 0
+    ready: int = 0
+    pending: int = 0
+    unavailable: int = 0
+
+
+class ArchiveSearchRead(ArchiveTaskListRead):
+    mode: str = "keyword"
+    coverage: SearchCoverage = PydanticField(default_factory=SearchCoverage)
+    total_is_exact: bool = True
+
+
+class ArchiveSearchTextRead(BaseModel):
+    title: str
+    paragraphs: list[str]
+    file_name: str
 
 
 class ArchiveTaskUpdate(BaseModel):

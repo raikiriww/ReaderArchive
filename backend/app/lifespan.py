@@ -15,6 +15,8 @@ from app.crud import (
     RuntimeConfigRepository,
     UserRepository,
 )
+from app.qwen_embedding import MODEL_NAME as QWEN_MODEL_NAME
+from app.qwen_embedding import QwenEmbeddingProvider
 from app.semantic import LocalEmbeddingProvider, SemanticDocumentPreparer
 from app.service import ArchiveTaskService
 
@@ -35,7 +37,8 @@ def create_lifespan(settings: Settings):
         archiver = SingleFileArchiver(settings)
         video_downloader = YtDlpDownloader(settings)
         browser_opener = BrowserOpener(settings)
-        embedding_provider = LocalEmbeddingProvider(settings)
+        embedding_provider = (QwenEmbeddingProvider(settings)
+            if settings.semantic_model_name == QWEN_MODEL_NAME else LocalEmbeddingProvider(settings))
         semantic_preparer = SemanticDocumentPreparer(
             min_chars=settings.semantic_chunk_min_chars,
             max_chars=settings.semantic_chunk_max_chars,
