@@ -43,7 +43,7 @@ class FakeModel:
 
 
 def provider():
-    instance = QwenEmbeddingProvider(Settings(_env_file=None, semantic_model_name=MODEL_NAME,
+    instance = QwenEmbeddingProvider(Settings(_env_file=None, semantic_search_enabled=True, semantic_model_name=MODEL_NAME,
         semantic_embedding_dimensions=384, semantic_query_lock_timeout_seconds=.01))
     instance._tokenizer = CharacterTokenizer()
     instance._model = FakeModel()
@@ -128,7 +128,7 @@ def test_busy_query_lock_falls_back_without_waiting_for_background_work():
 
 
 def test_cold_query_does_not_start_loading():
-    item = QwenEmbeddingProvider(Settings(_env_file=None, semantic_model_name=MODEL_NAME))
+    item = QwenEmbeddingProvider(Settings(_env_file=None, semantic_search_enabled=True, semantic_model_name=MODEL_NAME))
     with pytest.raises(RuntimeError, match='preparing'):
         item.embed_query('query')
     assert item._model is None
@@ -152,7 +152,7 @@ def test_preload_failure_retries_without_pending_articles(monkeypatch):
 
 
 def test_local_model_resolution_never_downloads(tmp_path):
-    item = QwenEmbeddingProvider(Settings(_env_file=None, semantic_model_name=MODEL_NAME,
+    item = QwenEmbeddingProvider(Settings(_env_file=None, semantic_search_enabled=True, semantic_model_name=MODEL_NAME,
         semantic_model_dir=tmp_path))
     with pytest.raises(RuntimeError, match='missing'):
         item._resolve_model_path()
@@ -168,7 +168,7 @@ def test_standalone_model_identity_mismatch_rejected_before_runtime_import(tmp_p
     manifest[field] = 'different'
     (tmp_path/'config.json').write_text('{}')
     (tmp_path/'reader-model.json').write_text(json.dumps(manifest))
-    item = QwenEmbeddingProvider(Settings(_env_file=None, semantic_model_name=MODEL_NAME,
+    item = QwenEmbeddingProvider(Settings(_env_file=None, semantic_search_enabled=True, semantic_model_name=MODEL_NAME,
         semantic_model_dir=tmp_path))
     original_import = builtins.__import__
 
@@ -186,6 +186,6 @@ def test_matching_standalone_model_identity_resolves(tmp_path):
     (tmp_path/'config.json').write_text('{}')
     (tmp_path/'reader-model.json').write_text(json.dumps({
         'model_name': MODEL_NAME, 'revision': MODEL_REVISION}))
-    item = QwenEmbeddingProvider(Settings(_env_file=None, semantic_model_name=MODEL_NAME,
+    item = QwenEmbeddingProvider(Settings(_env_file=None, semantic_search_enabled=True, semantic_model_name=MODEL_NAME,
         semantic_model_dir=tmp_path))
     assert item._resolve_model_path() == tmp_path
