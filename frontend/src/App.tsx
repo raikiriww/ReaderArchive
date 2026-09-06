@@ -34,6 +34,7 @@ import { AppDialog, type AppDialogRequest } from "./components/AppDialog";
 import { Toast } from "./components/Toast";
 import { DetailPanel } from "./features/archive/DetailPanel";
 import { TaskList } from "./features/archive/TaskList";
+import { SearchWorkspace } from "./features/search/SearchWorkspace";
 import { Topbar } from "./features/archive/Topbar";
 import { LoginPage } from "./features/auth/LoginPage";
 import { RssPanel } from "./features/rss/RssPanel";
@@ -71,6 +72,21 @@ export function MainApp(): JSX.Element {
   const [tagMenuOpen, setTagMenuOpen] = useState(false);
   const [taskFilter, setTaskFilter] = useState<TaskFilter>("unread");
   const [searchQuery, setSearchQuery] = useState("");
+  const [searchOpen, setSearchOpen] = useState(() => new URL(window.location.href).searchParams.has("reader_search"));
+  const [searchFocus, setSearchFocus] = useState(0);
+  const openSearch = useCallback(() => {
+    if (!new URL(window.location.href).searchParams.has("reader_search")) { const url = new URL(window.location.href); url.searchParams.set("reader_search", "{}"); window.history.pushState({ ...window.history.state }, "", url); }
+    setSearchOpen(true); setSearchFocus(value => value + 1);
+  }, []);
+  const closeSearch = useCallback(() => { const url = new URL(window.location.href); url.searchParams.delete("reader_search"); window.history.pushState({ ...window.history.state }, "", url); setSearchOpen(false); }, []);
+  useEffect(() => { const restore = () => setSearchOpen(new URL(window.location.href).searchParams.has("reader_search")); window.addEventListener("popstate", restore); return () => window.removeEventListener("popstate", restore); }, []);
+  useEffect(() => {
+    const handler = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") { event.preventDefault(); openSearch(); }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [openSearch]);
   const [taskOffset, setTaskOffset] = useState(0);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -178,6 +194,8 @@ export function MainApp(): JSX.Element {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ["archive-tasks"] }),
       queryClient.invalidateQueries({ queryKey: ["archive-tags"] }),
+      queryClient.invalidateQueries({ queryKey: ["archive-search"] }),
+      queryClient.invalidateQueries({ queryKey: ["archive-search-text"] }),
       queryClient.invalidateQueries({ queryKey: ["archive-files"] }),
     ]);
   }, [queryClient]);
@@ -187,6 +205,8 @@ export function MainApp(): JSX.Element {
       queryClient.invalidateQueries({ queryKey: ["rss-feeds"] }),
       queryClient.invalidateQueries({ queryKey: ["archive-tasks"] }),
       queryClient.invalidateQueries({ queryKey: ["archive-tags"] }),
+      queryClient.invalidateQueries({ queryKey: ["archive-search"] }),
+      queryClient.invalidateQueries({ queryKey: ["archive-search-text"] }),
     ]);
   }, [queryClient]);
 
@@ -247,11 +267,12 @@ export function MainApp(): JSX.Element {
   async function submitArchive(url: string): Promise<void> {
     try {
       const result = await createArchiveTask(url);
-      setSelectedTaskId(result.task_id);
+      if (!searchOpen) setSelectedTaskId(result.task_id);
       showToast("已开始保存网页");
       await invalidateArchiveData();
     } catch (error) {
       showToast(error instanceof Error ? error.message : "保存失败");
+      throw error;
     }
   }
 
@@ -532,9 +553,11 @@ export function MainApp(): JSX.Element {
   }
 
   return (
-    <div className="app-shell">
+    <div className={`app-shell ${searchOpen ? "search-is-open" : ""}`}>
       <main className="main-area">
         <Topbar
+          searchOpen={searchOpen}
+          onOpenSearch={openSearch}
           settingsButtonRef={settingsButtonRef}
           config={config}
           currentUser={currentUser}
@@ -547,8 +570,10 @@ export function MainApp(): JSX.Element {
           }}
           onLogout={() => void logout()}
         />
-        <div className="workspace">
+        <SearchWorkspace open={searchOpen} focusRequest={searchFocus} tags={tags} onClose={closeSearch} onMarkRead={markRead} />
+        <div className="workspace" hidden={searchOpen}>
           <TaskList
+            onOpenSearch={openSearch}
             tasks={tasks}
             total={tasksPage.total}
             selectedTaskId={selectedTaskId}

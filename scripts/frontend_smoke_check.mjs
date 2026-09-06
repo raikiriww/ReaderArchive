@@ -58,11 +58,13 @@ async function main() {
 
     await clickButtonByText(client, sessionId, "全部");
     await waitFor(client, sessionId, "document.querySelector('[aria-labelledby=\"taskPaneTitle\"] h1')?.textContent?.includes('全部')");
-    await waitFor(client, sessionId, "document.querySelector('#taskSearchInput')");
-    await setInputValue(client, sessionId, "#taskSearchInput", "zz-reader-no-match");
-    await waitFor(client, sessionId, "document.body.textContent.includes('没有匹配的存档记录')");
-    await evaluate(client, sessionId, "document.querySelector('button[aria-label=\"清空搜索\"]')?.click()");
-    await waitFor(client, sessionId, "document.querySelector('#taskSearchInput')?.value === ''");
+    await clickButtonByText(client, sessionId, "搜索存档");
+    await waitFor(client, sessionId, "document.querySelector('#archiveSearchInput')");
+    await setInputValue(client, sessionId, "#archiveSearchInput", "zz-reader-no-match");
+    await clickButtonByText(client, sessionId, "搜索");
+    await waitFor(client, sessionId, "document.body.textContent.includes('没有找到匹配内容')");
+    await waitFor(client, sessionId, "document.querySelector('#urlInput')");
+    await clickButtonByText(client, sessionId, "返回存档");
 
     const selectedDetail = await evaluate(client, sessionId, `
       (() => {

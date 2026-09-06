@@ -1,7 +1,7 @@
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import computed_field
+from pydantic import Field, computed_field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -41,16 +41,42 @@ class Settings(BaseSettings):
     rss_refresh_interval_seconds: int = 1800
     rss_request_timeout_seconds: int = 20
     semantic_search_enabled: bool = True
-    semantic_model_name: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+    semantic_model_name: str = "Qwen/Qwen3-Embedding-0.6B"
     semantic_model_dir: Path = Path("/app/models/fastembed")
     semantic_embedding_dimensions: int = 384
-    semantic_text_version: str = "title-body-v1"
+    semantic_text_version: str = "token-body-v2"
     semantic_batch_size: int = 16
+    semantic_threads: int = 2
+    semantic_query_lock_timeout_seconds: float = 0.15
+    semantic_retry_interval_seconds: float = 60
     semantic_search_limit: int = 120
     semantic_min_score: float = 0.34
     semantic_chunk_min_chars: int = 180
     semantic_chunk_max_chars: int = 900
     semantic_chunk_overlap_chars: int = 120
+    search_candidate_limit: int = 200
+    search_passages_per_article: int = 3
+    search_rerank_enabled: bool = True
+    search_rerank_model_name: str = "BAAI/bge-reranker-v2-m3"
+    search_rerank_revision: str = "953dc6f6f85a1b2dbfca4c34a2796e7dde08d41e"
+    search_rerank_quantization: str = "auto"
+    search_rerank_model_dir: Path = Path("/app/models/reranker")
+    search_cpu_threads: int = Field(default=4, ge=1, le=32)
+    search_rerank_batch_size: int = 2
+    search_rerank_max_length: int = 512
+    search_rerank_evidence_articles: int = 5
+
+    @model_validator(mode="after")
+    def search_model_defaults(self) -> "Settings":
+        explicit = set(self.model_fields_set)
+        if self.semantic_model_name == "Qwen/Qwen3-Embedding-0.6B":
+            if "semantic_model_dir" not in explicit:
+                self.semantic_model_dir = Path("/app/models/qwen")
+            if "semantic_text_version" not in explicit:
+                self.semantic_text_version = "qwen-sentence-v1"
+            if "search_candidate_limit" not in explicit:
+                self.search_candidate_limit = 10
+        return self
 
     @computed_field  # type: ignore[prop-decorator]
     @property

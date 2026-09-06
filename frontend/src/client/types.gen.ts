@@ -38,6 +38,59 @@ export type AppConfigUpdate = {
 };
 
 /**
+ * ArchiveSearchRead
+ */
+export type ArchiveSearchRead = {
+  /**
+   * Items
+   */
+  items: Array<ArchiveTaskRead>;
+  /**
+   * Total
+   */
+  total: number;
+  /**
+   * Limit
+   */
+  limit: number;
+  /**
+   * Offset
+   */
+  offset?: number;
+  /**
+   * Has More
+   */
+  has_more: boolean;
+  /**
+   * Mode
+   */
+  mode?: string;
+  coverage?: SearchCoverage;
+  /**
+   * Total Is Exact
+   */
+  total_is_exact?: boolean;
+};
+
+/**
+ * ArchiveSearchTextRead
+ */
+export type ArchiveSearchTextRead = {
+  /**
+   * Title
+   */
+  title: string;
+  /**
+   * Paragraphs
+   */
+  paragraphs: Array<string>;
+  /**
+   * File Name
+   */
+  file_name: string;
+};
+
+/**
  * ArchiveTagRead
  */
 export type ArchiveTagRead = {
@@ -266,6 +319,42 @@ export type ArchiveTaskSearchMatch = {
    * Score
    */
   score: number;
+  /**
+   * Kind
+   */
+  kind?: string;
+  /**
+   * Strength
+   */
+  strength?: string;
+  /**
+   * Highlights
+   */
+  highlights?: Array<SearchHighlight>;
+  /**
+   * File Name
+   */
+  file_name?: string | null;
+  /**
+   * Paragraph Index
+   */
+  paragraph_index?: number | null;
+  /**
+   * Paragraph Highlights
+   */
+  paragraph_highlights?: Array<SearchHighlight>;
+  /**
+   * Location Text
+   */
+  location_text?: string | null;
+  /**
+   * Version Count
+   */
+  version_count?: number;
+  /**
+   * Version Task Ids
+   */
+  version_task_ids?: Array<string>;
 };
 
 /**
@@ -536,6 +625,42 @@ export type RssFeedUpdate = {
    * Enabled
    */
   enabled?: boolean | null;
+};
+
+/**
+ * SearchCoverage
+ */
+export type SearchCoverage = {
+  /**
+   * Total
+   */
+  total?: number;
+  /**
+   * Ready
+   */
+  ready?: number;
+  /**
+   * Pending
+   */
+  pending?: number;
+  /**
+   * Unavailable
+   */
+  unavailable?: number;
+};
+
+/**
+ * SearchHighlight
+ */
+export type SearchHighlight = {
+  /**
+   * Start
+   */
+  start: number;
+  /**
+   * End
+   */
+  end: number;
 };
 
 /**
@@ -1089,6 +1214,106 @@ export type ArchiveTasksCreateArchiveTaskResponses = {
 
 export type ArchiveTasksCreateArchiveTaskResponse =
   ArchiveTasksCreateArchiveTaskResponses[keyof ArchiveTasksCreateArchiveTaskResponses];
+
+export type ArchiveTasksSearchArchiveTasksData = {
+  body?: never;
+  path?: never;
+  query?: {
+    /**
+     * Q
+     */
+    q?: string;
+    /**
+     * Limit
+     */
+    limit?: number;
+    /**
+     * Offset
+     */
+    offset?: number;
+    /**
+     * Include Read
+     */
+    include_read?: boolean;
+    /**
+     * Tags
+     */
+    tags?: Array<string> | null;
+    /**
+     * Content Type
+     */
+    content_type?: "all" | "web" | "video" | "file";
+    /**
+     * Source
+     */
+    source?: ("manual" | "rss") | null;
+    /**
+     * Date From
+     */
+    date_from?: string | null;
+    /**
+     * Exact
+     */
+    exact?: boolean;
+    /**
+     * Sort
+     */
+    sort?: "relevance" | "newest" | "oldest";
+  };
+  url: "/api/v1/archive-search";
+};
+
+export type ArchiveTasksSearchArchiveTasksErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type ArchiveTasksSearchArchiveTasksError =
+  ArchiveTasksSearchArchiveTasksErrors[keyof ArchiveTasksSearchArchiveTasksErrors];
+
+export type ArchiveTasksSearchArchiveTasksResponses = {
+  /**
+   * Successful Response
+   */
+  200: ArchiveSearchRead;
+};
+
+export type ArchiveTasksSearchArchiveTasksResponse =
+  ArchiveTasksSearchArchiveTasksResponses[keyof ArchiveTasksSearchArchiveTasksResponses];
+
+export type ArchiveTasksReadSearchTextData = {
+  body?: never;
+  path: {
+    /**
+     * Task Id
+     */
+    task_id: string;
+  };
+  query?: never;
+  url: "/api/v1/archive-search/{task_id}/text";
+};
+
+export type ArchiveTasksReadSearchTextErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type ArchiveTasksReadSearchTextError =
+  ArchiveTasksReadSearchTextErrors[keyof ArchiveTasksReadSearchTextErrors];
+
+export type ArchiveTasksReadSearchTextResponses = {
+  /**
+   * Successful Response
+   */
+  200: ArchiveSearchTextRead;
+};
+
+export type ArchiveTasksReadSearchTextResponse =
+  ArchiveTasksReadSearchTextResponses[keyof ArchiveTasksReadSearchTextResponses];
 
 export type ArchiveTasksListArchiveTagsData = {
   body?: never;

@@ -8,6 +8,7 @@ import "./styles/tailwind.css";
 import "./styles/base.css";
 import "./styles/layout.css";
 import "./styles/components.css";
+import "./styles/search.css";
 
 const queryClient = new QueryClient({
   defaultOptions: {

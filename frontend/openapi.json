@@ -682,6 +682,233 @@
         }
       }
     },
+    "/api/v1/archive-search": {
+      "get": {
+        "tags": [
+          "archive-tasks"
+        ],
+        "summary": "Search Archive Tasks",
+        "operationId": "archive-tasks-search_archive_tasks",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 240,
+              "default": "",
+              "title": "Q"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 20,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          },
+          {
+            "name": "include_read",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": true,
+              "title": "Include Read"
+            }
+          },
+          {
+            "name": "tags",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "maxItems": 80
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Tags"
+            }
+          },
+          {
+            "name": "content_type",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "all",
+                "web",
+                "video",
+                "file"
+              ],
+              "type": "string",
+              "default": "all",
+              "title": "Content Type"
+            }
+          },
+          {
+            "name": "source",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "manual",
+                    "rss"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Source"
+            }
+          },
+          {
+            "name": "date_from",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Date From"
+            }
+          },
+          {
+            "name": "exact",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Exact"
+            }
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "relevance",
+                "newest",
+                "oldest"
+              ],
+              "type": "string",
+              "default": "relevance",
+              "title": "Sort"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArchiveSearchRead"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/archive-search/{task_id}/text": {
+      "get": {
+        "tags": [
+          "archive-tasks"
+        ],
+        "summary": "Read Search Text",
+        "operationId": "archive-tasks-read_search_text",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Task Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArchiveSearchTextRead"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/archive-tags": {
       "get": {
         "tags": [
@@ -1852,6 +2079,81 @@
         "type": "object",
         "title": "AppConfigUpdate"
       },
+      "ArchiveSearchRead": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ArchiveTaskRead"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "limit": {
+            "type": "integer",
+            "title": "Limit"
+          },
+          "offset": {
+            "type": "integer",
+            "title": "Offset",
+            "default": 0
+          },
+          "has_more": {
+            "type": "boolean",
+            "title": "Has More"
+          },
+          "mode": {
+            "type": "string",
+            "title": "Mode",
+            "default": "keyword"
+          },
+          "coverage": {
+            "$ref": "#/components/schemas/SearchCoverage"
+          },
+          "total_is_exact": {
+            "type": "boolean",
+            "title": "Total Is Exact",
+            "default": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "total",
+          "limit",
+          "has_more"
+        ],
+        "title": "ArchiveSearchRead"
+      },
+      "ArchiveSearchTextRead": {
+        "properties": {
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "paragraphs": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Paragraphs"
+          },
+          "file_name": {
+            "type": "string",
+            "title": "File Name"
+          }
+        },
+        "type": "object",
+        "required": [
+          "title",
+          "paragraphs",
+          "file_name"
+        ],
+        "title": "ArchiveSearchTextRead"
+      },
       "ArchiveTagRead": {
         "properties": {
           "name": {
@@ -2275,6 +2577,75 @@
           "score": {
             "type": "number",
             "title": "Score"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind",
+            "default": "semantic"
+          },
+          "strength": {
+            "type": "string",
+            "title": "Strength",
+            "default": "possible"
+          },
+          "highlights": {
+            "items": {
+              "$ref": "#/components/schemas/SearchHighlight"
+            },
+            "type": "array",
+            "title": "Highlights"
+          },
+          "file_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "File Name"
+          },
+          "paragraph_index": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Paragraph Index"
+          },
+          "paragraph_highlights": {
+            "items": {
+              "$ref": "#/components/schemas/SearchHighlight"
+            },
+            "type": "array",
+            "title": "Paragraph Highlights"
+          },
+          "location_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Location Text"
+          },
+          "version_count": {
+            "type": "integer",
+            "title": "Version Count",
+            "default": 1
+          },
+          "version_task_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Version Task Ids"
           }
         },
         "type": "object",
@@ -2724,6 +3095,50 @@
         },
         "type": "object",
         "title": "RssFeedUpdate"
+      },
+      "SearchCoverage": {
+        "properties": {
+          "total": {
+            "type": "integer",
+            "title": "Total",
+            "default": 0
+          },
+          "ready": {
+            "type": "integer",
+            "title": "Ready",
+            "default": 0
+          },
+          "pending": {
+            "type": "integer",
+            "title": "Pending",
+            "default": 0
+          },
+          "unavailable": {
+            "type": "integer",
+            "title": "Unavailable",
+            "default": 0
+          }
+        },
+        "type": "object",
+        "title": "SearchCoverage"
+      },
+      "SearchHighlight": {
+        "properties": {
+          "start": {
+            "type": "integer",
+            "title": "Start"
+          },
+          "end": {
+            "type": "integer",
+            "title": "End"
+          }
+        },
+        "type": "object",
+        "required": [
+          "start",
+          "end"
+        ],
+        "title": "SearchHighlight"
       },
       "SemanticHealthRead": {
         "properties": {

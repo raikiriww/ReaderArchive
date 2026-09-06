@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { Check, ChevronDown, ChevronLeft, ChevronRight, Rss, Search, Tag, X } from "lucide-react";
+import { Check, ChevronDown, ChevronLeft, ChevronRight, Rss, Search, Tag } from "lucide-react";
 import type { ArchiveTag, ArchiveTask, TaskFilter } from "../../types/domain";
 import { formatDate, safeUrl, sourceLabel, taskTitle } from "../../utils/format";
 
@@ -16,6 +16,7 @@ interface TaskListProps {
   selectedTaskId: string | null;
   taskFilter: TaskFilter;
   searchQuery: string;
+  onOpenSearch?: () => void;
   tags: ArchiveTag[];
   tagFilters: string[];
   tagMenuOpen: boolean;
@@ -40,6 +41,7 @@ export function TaskList({
   selectedTaskId,
   taskFilter,
   searchQuery,
+  onOpenSearch,
   tags,
   tagFilters,
   tagMenuOpen,
@@ -51,7 +53,6 @@ export function TaskList({
   onJumpToPage,
   onSelectTask,
   onSetFilter,
-  onSearchQueryChange,
   onToggleTagMenu,
   onToggleTag,
   onClearTags,
@@ -99,24 +100,7 @@ export function TaskList({
           订阅源
         </button>
       </div>
-      <div className="task-search">
-        <label className="visually-hidden" htmlFor="taskSearchInput">
-          搜索存档
-        </label>
-        <Search className="task-search-icon" size={16} aria-hidden="true" />
-        <input
-          id="taskSearchInput"
-          type="search"
-          placeholder="搜索存档"
-          value={searchQuery}
-          onChange={(event) => onSearchQueryChange(event.target.value)}
-        />
-        {cleanedSearch ? (
-          <button className="task-search-clear" type="button" aria-label="清空搜索" onClick={() => onSearchQueryChange("")}>
-            <X size={15} />
-          </button>
-        ) : null}
-      </div>
+      {onOpenSearch ? <button className="library-search-entry text-button" type="button" onClick={onOpenSearch}><Search size={16} />查找全部存档<span>搜索标题、正文或大意</span></button> : null}
       <div className="filter-tabs" role="group" aria-label="存档记录筛选">
         {(Object.keys(filterLabels) as TaskFilter[]).map((filter) => (
           <button

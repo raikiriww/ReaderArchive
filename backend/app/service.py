@@ -4,6 +4,8 @@ import asyncio
 import json
 import logging
 import re
+import threading
+from collections import OrderedDict
 from collections.abc import AsyncIterator
 from contextlib import suppress
 from dataclasses import dataclass
@@ -19,8 +21,10 @@ from app.archiver import (
     SingleFileArchiver,
     YtDlpDownloader,
 )
-from app.crud import ArchiveTaskRepository, SemanticSearchMatch
+from app.crud import ArchiveTaskRepository
 from app.models import (
+    ArchiveSearchRead,
+    ArchiveSearchTextRead,
     ArchiveTagRead,
     ArchiveTaskListRead,
     ArchiveTaskRead,
@@ -34,6 +38,8 @@ from app.models import (
     RssFeedRefreshResult,
     SemanticHealthRead,
 )
+from app.qwen_embedding import QwenEmbeddingProvider
+from app.reranking import LocalRerankerProvider
 from app.rss import (
     RssFeedFetcher,
     normalize_article_url,
@@ -43,6 +49,7 @@ from app.rss import (
 from app.semantic import (
     LocalEmbeddingProvider,
     SemanticDocumentPreparer,
+    hash_text,
     semantic_texts_for_embedding,
 )
 from app.site_rules import ArchiveSiteRuleRegistry, default_site_rule_registry
@@ -63,7 +70,7 @@ class ArchiveTaskService:
         archiver: SingleFileArchiver,
         video_downloader: YtDlpDownloader,
         browser_opener: BrowserOpener,
-        embedding_provider: LocalEmbeddingProvider | None = None,
+        embedding_provider: LocalEmbeddingProvider | QwenEmbeddingProvider | None = None,
         semantic_preparer: SemanticDocumentPreparer | None = None,
         site_rule_registry: ArchiveSiteRuleRegistry | None = None,
     ) -> None:
@@ -72,16 +79,38 @@ class ArchiveTaskService:
         self.video_downloader = video_downloader
         self.browser_opener = browser_opener
         self.embedding_provider = embedding_provider
-        self.semantic_preparer = semantic_preparer
+        self.reranking_provider = LocalRerankerProvider(
+            cache_dir=archiver.settings.search_rerank_model_dir,
+            model_name=archiver.settings.search_rerank_model_name,
+            revision=archiver.settings.search_rerank_revision,
+            quantization=archiver.settings.search_rerank_quantization,
+            enabled=archiver.settings.search_rerank_enabled and archiver.settings.semantic_search_enabled,
+            num_threads=archiver.settings.search_cpu_threads,
+            batch_size=archiver.settings.search_rerank_batch_size,
+            max_length=archiver.settings.search_rerank_max_length,
+            max_passages=min(4096, archiver.settings.search_candidate_limit * 6),
+        )
+        self.reranking_last_error: str | None = None
+        self.search_ranking_cache: OrderedDict[str, tuple] = OrderedDict()
+        self.search_ranking_cache_lock = threading.Lock()
+        self.reranking_worker: asyncio.Task[None] | None = None
+        self.semantic_preparer = semantic_preparer or SemanticDocumentPreparer(
+            min_chars=archiver.settings.semantic_chunk_min_chars,
+            max_chars=archiver.settings.semantic_chunk_max_chars,
+            overlap_chars=archiver.settings.semantic_chunk_overlap_chars,
+        )
         self.site_rule_registry = site_rule_registry or default_site_rule_registry()
         self.queue: asyncio.Queue[str] = asyncio.Queue()
         self.semantic_queue: asyncio.Queue[str] = asyncio.Queue()
+        self.text_queue: asyncio.Queue[str] = asyncio.Queue()
         self.worker: asyncio.Task[None] | None = None
         self.semantic_worker: asyncio.Task[None] | None = None
+        self.text_worker: asyncio.Task[None] | None = None
         self.rss_worker: asyncio.Task[None] | None = None
         self.video_retry_workers: set[asyncio.Task[None]] = set()
         self.rss_lock = asyncio.Lock()
         self.semantic_last_error: str | None = None
+        self._index_locks: dict[str, threading.Lock] = {}
 
     async def start(self) -> None:
         self.repository.initialize()
@@ -91,6 +120,8 @@ class ArchiveTaskService:
             await self.queue.put(task_id)
         self.worker = asyncio.create_task(self._run_worker())
         self.semantic_worker = asyncio.create_task(self._run_semantic_worker())
+        self.text_worker = asyncio.create_task(self._run_text_worker())
+        self.reranking_worker = asyncio.create_task(self._run_reranking_worker())
         self.rss_worker = asyncio.create_task(self._run_rss_worker())
         await self._enqueue_semantic_backfill()
 
@@ -98,6 +129,8 @@ class ArchiveTaskService:
         for worker in (
             self.worker,
             self.semantic_worker,
+            self.text_worker,
+            self.reranking_worker,
             self.rss_worker,
             *self.video_retry_workers,
         ):
@@ -152,7 +185,19 @@ class ArchiveTaskService:
         tag_filters = self._clean_tags([*(tags or []), *([tag] if tag else [])])
         statuses = self._task_statuses_for_filter(status_filter)
         cleaned_query = self._clean_title(query) or self._clean_title(title_query)
-        semantic_matches = self._semantic_matches(cleaned_query)
+        if cleaned_query:
+            from app.search import search_archive
+
+            page = search_archive(self, query=cleaned_query, limit=limit, offset=offset,
+                include_read=include_read, tags=tag_filters, content_type="all", source=None,
+                date_from=None, exact=False, sort="relevance", statuses=statuses,
+                group_duplicates=False)
+            # Legacy list clients use None to distinguish title-only matching.
+            items = [task.model_copy(update={"search_match": None})
+                if task.search_match and task.search_match.kind in {"title", "tag", "url"}
+                else task for task in page.items]
+            return ArchiveTaskListRead(items=items, total=page.total, limit=limit,
+                offset=offset, has_more=page.has_more)
         tasks, total = self.repository.list_recent(
             limit,
             offset=offset,
@@ -160,7 +205,6 @@ class ArchiveTaskService:
             tags=tag_filters,
             title_query=cleaned_query,
             statuses=statuses,
-            semantic_matches=semantic_matches,
         )
         return ArchiveTaskListRead(
             items=[self._with_existing_result_files(task) for task in tasks],
@@ -169,6 +213,28 @@ class ArchiveTaskService:
             offset=offset,
             has_more=offset + len(tasks) < total,
         )
+
+    def search_tasks(
+        self, query: str, limit: int = 20, offset: int = 0,
+        include_read: bool = True, tags: list[str] | None = None,
+        content_type: str = "all", source: str | None = None,
+        date_from: datetime | None = None, exact: bool = False, sort: str = "relevance",
+    ) -> ArchiveSearchRead:
+        from app.search import search_archive
+
+        return search_archive(self, query=query, limit=limit, offset=offset,
+            include_read=include_read, tags=tags, content_type=content_type,
+            source=source, date_from=date_from, exact=exact, sort=sort)
+
+    def get_search_text(self, task_id: str) -> ArchiveSearchTextRead | None:
+        task = self.get_task(task_id)
+        document = self.repository.get_search_document(task_id)
+        if task is None or document is None or document.status != "ready":
+            return None
+        if not (self.archiver.settings.archive_dir / document.file_name).is_file():
+            return None
+        return ArchiveSearchTextRead(title=task.display_title,
+            paragraphs=document.content.split("\n\n"), file_name=document.file_name)
 
     def list_tags(self) -> list[ArchiveTagRead]:
         return [ArchiveTagRead(**tag) for tag in self.repository.list_tags()]
@@ -190,6 +256,8 @@ class ArchiveTaskService:
             if not self.repository.replace_task_tags(task_id, self._clean_tags(tags)):
                 return None
         task = self.repository.get(task_id)
+        if task and custom_title_provided and self.archiver.settings.semantic_search_enabled:
+            self.semantic_queue.put_nowait(task_id)
         return self._with_existing_result_files(task) if task else None
 
     def mark_task_read(self, task_id: str) -> None:
@@ -627,15 +695,60 @@ class ArchiveTaskService:
                 pass
             await asyncio.sleep(max(1, self.archiver.settings.rss_refresh_interval_seconds))
 
+    async def _run_text_worker(self) -> None:
+        # The basic text queue remains independent of a slow/unavailable model.
+        while True:
+            task_id = await self.text_queue.get()
+            try:
+                await asyncio.to_thread(self._index_task_semantics, task_id, True)
+                if self.archiver.settings.semantic_search_enabled:
+                    await self.semantic_queue.put(task_id)
+            except Exception:
+                logger.exception("Text extraction failed for task %s.", task_id)
+            finally:
+                self.text_queue.task_done()
+
+    async def _run_reranking_worker(self) -> None:
+        if not self.reranking_provider.enabled:
+            return
+        while True:
+            try:
+                await asyncio.to_thread(self.reranking_provider.preload)
+                self.reranking_last_error = None
+            except Exception as exc:
+                self.reranking_last_error = self._short_error(str(exc))
+                logger.warning("Search refinement unavailable; retrieval remains available: %s", exc)
+            await asyncio.sleep(max(1, self.archiver.settings.semantic_retry_interval_seconds))
+
     async def _run_semantic_worker(self) -> None:
-        if self.embedding_provider is not None:
+        if self.embedding_provider is not None and self.archiver.settings.semantic_search_enabled:
             try:
                 await asyncio.to_thread(self.embedding_provider.preload)
             except Exception as exc:
                 self.semantic_last_error = self._short_error(str(exc))
-                logger.exception("Semantic embedding model failed to preload.")
+                logger.exception("Semantic model failed to preload; text extraction continues.")
         while True:
-            task_id = await self.semantic_queue.get()
+            try:
+                task_id = await asyncio.wait_for(self.semantic_queue.get(),
+                    timeout=max(0.01, self.archiver.settings.semantic_retry_interval_seconds))
+            except TimeoutError:
+                if self._semantic_enabled():
+                    try:
+                        # Retry a failed cold start even when every document already
+                        # has vectors and there is otherwise nothing to enqueue.
+                        if self.embedding_provider is not None and hasattr(self.embedding_provider, "preload"):
+                            await asyncio.to_thread(self.embedding_provider.preload)
+                            self.semantic_last_error = None
+                        task_ids = await asyncio.to_thread(
+                            self.repository.list_task_ids_requiring_semantic_index,
+                            self._semantic_model_name(), self._semantic_embedding_dimensions(),
+                            self._semantic_text_version())
+                        for task_id in task_ids:
+                            await self.semantic_queue.put(task_id)
+                    except Exception as exc:
+                        self.semantic_last_error = self._short_error(str(exc))
+                        logger.exception("Semantic recovery will retry after the idle interval.")
+                continue
             try:
                 await asyncio.to_thread(self._index_task_semantics, task_id)
             except Exception as exc:
@@ -790,22 +903,22 @@ class ArchiveTaskService:
         return PageArchiveOutcome()
 
     async def _enqueue_semantic_backfill(self) -> None:
-        if not self._semantic_enabled():
-            return
-        for task_id in self.repository.list_task_ids_requiring_semantic_index(
-            self._semantic_model_name(),
-            self._semantic_embedding_dimensions(),
-            self._semantic_text_version(),
-        ):
-            await self.semantic_queue.put(task_id)
+        task_ids = self.repository.list_task_ids_requiring_search_document()
+        if self._semantic_enabled():
+            task_ids.extend(self.repository.list_task_ids_requiring_semantic_index(
+                self._semantic_model_name(), self._semantic_embedding_dimensions(),
+                self._semantic_text_version()))
+        for task_id in dict.fromkeys(task_ids):
+            await self.text_queue.put(task_id)
 
     async def _enqueue_semantic_task(self, task_id: str) -> None:
-        if self._semantic_enabled():
-            await self.semantic_queue.put(task_id)
+        await self.text_queue.put(task_id)
 
-    def _index_task_semantics(self, task_id: str) -> None:
-        if not self._semantic_enabled():
-            return
+    def _index_task_semantics(self, task_id: str, lexical_only: bool = False) -> None:
+        with self._index_locks.setdefault(task_id, threading.Lock()):
+            self._index_task_search(task_id, lexical_only)
+
+    def _index_task_search(self, task_id: str, lexical_only: bool = False) -> None:
         model_name = self._semantic_model_name()
         embedding_dimensions = self._semantic_embedding_dimensions()
         text_version = self._semantic_text_version()
@@ -814,6 +927,7 @@ class ArchiveTaskService:
             return
         path = self.archiver.settings.archive_dir / task.result.file_name
         if not path.is_file():
+            self.repository.save_search_document(task_id, path.name, "", "unavailable", "Archive file is missing.")
             self.repository.mark_semantic_index_failed(
                 task_id,
                 model_name,
@@ -823,11 +937,12 @@ class ArchiveTaskService:
             )
             return
         assert self.semantic_preparer is not None
-        assert self.embedding_provider is not None
         document_hash: str | None = None
         try:
             prepared = self.semantic_preparer.prepare(path)
             if prepared is None:
+                self.repository.save_search_document(task_id, path.name, "", "unavailable",
+                    "No readable text was extracted.")
                 self.repository.mark_semantic_index_skipped(
                     task_id,
                     model_name,
@@ -837,12 +952,16 @@ class ArchiveTaskService:
                     "No readable text was extracted.",
                 )
                 return
-            document_hash = prepared.document_hash
+            self.repository.save_search_document(task_id, path.name, prepared.text)
+            if lexical_only or not self._semantic_enabled():
+                return
+            assert self.embedding_provider is not None
+            document_hash = hash_text(task.display_title + "\n\n" + prepared.text)
             existing = self.repository.semantic_index_record(task_id, model_name, text_version)
             if (
                 existing is not None
                 and existing.status == "indexed"
-                and existing.document_hash == prepared.document_hash
+                and existing.document_hash == document_hash
                 and existing.embedding_dimensions == embedding_dimensions
             ):
                 return
@@ -852,7 +971,12 @@ class ArchiveTaskService:
                 embedding_dimensions,
                 text_version,
             )
-            texts = semantic_texts_for_embedding(task.display_title, prepared.chunks)
+            if hasattr(self.embedding_provider, "prepare_embedding_chunks"):
+                chunks, texts = self.embedding_provider.prepare_embedding_chunks(task.display_title, prepared.text)
+            else:
+                # Test/custom providers with no tokenizer retain their own declared behavior.
+                chunks = prepared.chunks
+                texts = semantic_texts_for_embedding(task.display_title, chunks)
             embeddings: list[list[float]] = []
             batch_size = max(1, self.archiver.settings.semantic_batch_size)
             for index in range(0, len(texts), batch_size):
@@ -879,8 +1003,8 @@ class ArchiveTaskService:
                 model_name,
                 embedding_dimensions,
                 text_version,
-                prepared.document_hash,
-                prepared.chunks,
+                document_hash,
+                chunks,
                 embeddings,
             )
             self.semantic_last_error = None
@@ -896,39 +1020,6 @@ class ArchiveTaskService:
                 document_hash=document_hash,
             )
             raise
-
-    def _semantic_matches(self, query: str | None) -> dict[str, SemanticSearchMatch]:
-        if not query:
-            return {}
-        model_name = self._semantic_model_name()
-        matches = self.repository.search_semantic_chunk_text(
-            query,
-            model_name,
-            self.archiver.settings.semantic_search_limit,
-        )
-        if not self._semantic_enabled():
-            return matches
-        assert self.embedding_provider is not None
-        try:
-            embeddings = self.embedding_provider.embed([query])
-            if len(embeddings) != 1:
-                return matches
-            self._validate_embedding_dimensions(embeddings[0])
-            semantic_matches = self.repository.search_semantic_chunks(
-                embeddings[0],
-                self.embedding_provider.model_name,
-                self.archiver.settings.semantic_search_limit,
-                self.archiver.settings.semantic_min_score,
-            )
-        except Exception as exc:
-            self.semantic_last_error = self._short_error(str(exc))
-            logger.exception("Semantic search failed.")
-            return matches
-        for task_id, match in semantic_matches.items():
-            existing = matches.get(task_id)
-            if existing is None or match.score > existing.score:
-                matches[task_id] = match
-        return matches
 
     def semantic_health(self) -> SemanticHealthRead:
         enabled = self.archiver.settings.semantic_search_enabled

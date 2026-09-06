@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import mimetypes
+from datetime import datetime
 from html import escape
 from pathlib import Path
 from typing import Literal
@@ -11,6 +13,8 @@ from fastapi.responses import FileResponse, HTMLResponse
 
 from app.api.deps import get_archive_task_service
 from app.models import (
+    ArchiveSearchRead,
+    ArchiveSearchTextRead,
     ArchiveTagRead,
     ArchiveTaskCreate,
     ArchiveTaskCreated,
@@ -60,7 +64,8 @@ def create_router() -> APIRouter:
         ),
     ) -> ArchiveTaskListRead:
         service = get_archive_task_service(request)
-        return service.list_tasks(
+        return await asyncio.to_thread(
+            service.list_tasks,
             limit,
             offset=offset,
             include_read=include_read,
@@ -70,6 +75,43 @@ def create_router() -> APIRouter:
             title_query=title,
             status_filter=status_filter,
         )
+
+    @router.get("/archive-search", response_model=ArchiveSearchRead)
+    async def search_archive_tasks(
+        request: Request,
+        q: str = Query(default="", max_length=240),
+        limit: int = Query(default=20, ge=1, le=100),
+        offset: int = Query(default=0, ge=0),
+        include_read: bool = Query(default=True),
+        tags: list[str] | None = Query(default=None, max_length=80),
+        content_type: Literal["all", "web", "video", "file"] = Query(default="all"),
+        source: Literal["manual", "rss"] | None = Query(default=None),
+        date_from: datetime | None = Query(default=None),
+        exact: bool = Query(default=False),
+        sort: Literal["relevance", "newest", "oldest"] = Query(default="relevance"),
+    ) -> ArchiveSearchRead:
+        service = get_archive_task_service(request)
+        return await asyncio.to_thread(
+            service.search_tasks,
+            query=q,
+            limit=limit,
+            offset=offset,
+            include_read=include_read,
+            tags=tags,
+            content_type=content_type,
+            source=source,
+            date_from=date_from,
+            exact=exact,
+            sort=sort,
+        )
+
+    @router.get("/archive-search/{task_id}/text", response_model=ArchiveSearchTextRead)
+    async def read_search_text(task_id: str, request: Request) -> ArchiveSearchTextRead:
+        service = get_archive_task_service(request)
+        document = await asyncio.to_thread(service.get_search_text, task_id)
+        if document is None:
+            raise HTTPException(status_code=404, detail="Searchable archive text is unavailable.")
+        return document
 
     @router.get("/archive-tags", response_model=list[ArchiveTagRead])
     async def list_archive_tags(request: Request) -> list[ArchiveTagRead]:

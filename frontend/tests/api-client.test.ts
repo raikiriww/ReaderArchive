@@ -68,3 +68,61 @@ function generatedResult<T>(data: T | undefined, status: number, error?: unknown
     response: new Response(null, { status }),
   });
 }
+
+describe("archive search API", () => {
+  test("sends every filter before pagination and supports request cancellation", async () => {
+    const { searchArchives } = await import("../src/features/search/api");
+    const originalFetch = globalThis.fetch;
+    let requestedUrl = "";
+    let requestedOptions: RequestInit | undefined;
+    globalThis.fetch = (async (input: RequestInfo | URL, options?: RequestInit) => {
+      requestedUrl = String(input); requestedOptions = options;
+      return new Response(JSON.stringify({ items: [], total: 0 }), { status: 200 });
+    }) as typeof fetch;
+    setAccessToken("search-token");
+    const controller = new AbortController();
+    try {
+      await searchArchives("备份", { content_type: "web", source: "rss", date_from: "2026-01-01", tags: ["research", "中文"], include_read: false, exact: true, sort: "oldest" }, 40, controller.signal);
+      const url = new URL(requestedUrl, "http://reader.local");
+      expect(url.pathname).toBe("/api/v1/archive-search");
+      expect(url.searchParams.get("q")).toBe("备份");
+      expect(url.searchParams.getAll("tags")).toEqual(["research", "中文"]);
+      expect(url.searchParams.get("source")).toBe("rss");
+      expect(url.searchParams.get("content_type")).toBe("web");
+      expect(url.searchParams.get("include_read")).toBe("false");
+      expect(url.searchParams.get("exact")).toBe("true");
+      expect(url.searchParams.get("sort")).toBe("oldest");
+      expect(url.searchParams.get("offset")).toBe("40");
+      expect(url.searchParams.get("date_from")).toMatch(/^202[56]-/);
+      expect(requestedOptions?.signal).toBe(controller.signal);
+      expect((requestedOptions?.headers as Record<string, string>).Authorization).toBe("Bearer search-token");
+    } finally { globalThis.fetch = originalFetch; }
+  });
+  test("surfaces search failures instead of treating them as an empty result", async () => {
+    const { searchArchives } = await import("../src/features/search/api");
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async () => new Response(JSON.stringify({ detail: "搜索暂不可用" }), { status: 503 })) as typeof fetch;
+    try {
+      await expect(searchArchives("备份", { content_type: "all", source: "", date_from: "", tags: [], include_read: true, exact: false, sort: "relevance" }, 0)).rejects.toEqual(new ApiError("搜索暂不可用", 503));
+    } finally { globalThis.fetch = originalFetch; }
+  });
+});
+
+
+describe("search connection failures", () => {
+  test("uses Chinese connection guidance for search and reading while preserving cancellation", async () => {
+    const { searchArchives, readSearchText } = await import("../src/features/search/api");
+    const originalFetch = globalThis.fetch;
+    const filters = { content_type: "all", source: "", date_from: "", tags: [], include_read: true, exact: false, sort: "relevance" } as const;
+    const search = () => searchArchives("备份", { ...filters, tags: [] }, 0);
+    try {
+      globalThis.fetch = (async () => { throw new TypeError("Failed to fetch"); }) as typeof fetch;
+      await expect(search()).rejects.toEqual(new ApiError("无法连接服务器，请检查网络后重试。", 0));
+      await expect(readSearchText("task-1")).rejects.toEqual(new ApiError("无法连接服务器，请检查网络后重试。", 0));
+      const cancelled = new DOMException("The operation was aborted.", "AbortError");
+      globalThis.fetch = (async () => { throw cancelled; }) as typeof fetch;
+      await expect(search()).rejects.toBe(cancelled);
+      await expect(readSearchText("task-1")).rejects.toBe(cancelled);
+    } finally { globalThis.fetch = originalFetch; }
+  });
+});

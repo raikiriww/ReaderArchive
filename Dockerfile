@@ -99,6 +99,55 @@ if image_dir.exists():
 copytree(cache_dir, image_dir)
 PY
 
+# Ship the CPU ranking model in the image: upgrades do not require a new
+# compose setting or a network download on the first user search.
+RUN --mount=type=cache,target=/root/.cache/reader-reranker \
+  /app/backend/.venv/bin/python - <<'PY'
+from pathlib import Path
+from shutil import copytree
+import json
+from huggingface_hub import snapshot_download
+
+cache = Path('/root/.cache/reader-reranker')
+snapshot = snapshot_download(
+    'BAAI/bge-reranker-v2-m3',
+    revision='953dc6f6f85a1b2dbfca4c34a2796e7dde08d41e',
+    cache_dir=str(cache),
+    allow_patterns=['config.json', 'model.safetensors', 'tokenizer.json',
+                    'tokenizer_config.json', 'special_tokens_map.json',
+                    'sentencepiece.bpe.model'],
+)
+copytree(snapshot, '/app/models/reranker')
+Path('/app/models/reranker/reader-model.json').write_text(json.dumps({
+    'model_name': 'BAAI/bge-reranker-v2-m3',
+    'revision': '953dc6f6f85a1b2dbfca4c34a2796e7dde08d41e',
+}))
+PY
+
+# Keep both embedding models available offline so users who explicitly retain
+# MiniLM can upgrade the same image without changing their compose settings.
+RUN --mount=type=cache,target=/root/.cache/reader-qwen \
+  /app/backend/.venv/bin/python - <<'PY'
+from shutil import copytree
+from pathlib import Path
+import json
+from huggingface_hub import snapshot_download
+
+snapshot = snapshot_download(
+    'Qwen/Qwen3-Embedding-0.6B',
+    revision='97b0c614be4d77ee51c0cef4e5f07c00f9eb65b3',
+    cache_dir='/root/.cache/reader-qwen',
+    allow_patterns=['config.json', 'model.safetensors', 'tokenizer.json',
+                    'tokenizer_config.json', 'special_tokens_map.json',
+                    'vocab.json', 'merges.txt'],
+)
+copytree(snapshot, '/app/models/qwen')
+Path('/app/models/qwen/reader-model.json').write_text(json.dumps({
+    'model_name': 'Qwen/Qwen3-Embedding-0.6B',
+    'revision': '97b0c614be4d77ee51c0cef4e5f07c00f9eb65b3',
+}))
+PY
+
 COPY backend/app ./app
 COPY backend/scripts ./scripts
 COPY backend/alembic.ini ./alembic.ini

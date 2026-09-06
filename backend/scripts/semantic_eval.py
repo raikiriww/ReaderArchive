@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import time
 import urllib.error
@@ -14,14 +15,19 @@ from http.cookiejar import CookieJar
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import text
+from sqlalchemy import make_url, text
 from sqlmodel import Session
 
+from app.archiver import BrowserOpener, SingleFileArchiver, YtDlpDownloader
 from app.core.config import Settings
 from app.core.db import get_engine
 from app.crud import ArchiveTaskRepository
 from app.models import ArchiveTaskSourceType
-from app.semantic import LocalEmbeddingProvider, SemanticDocumentPreparer, semantic_texts_for_embedding
+from app.semantic import (
+    LocalEmbeddingProvider,
+    SemanticDocumentPreparer,
+)
+from app.service import ArchiveTaskService
 
 
 @dataclass(frozen=True)
@@ -40,6 +46,7 @@ class EvalQuery:
     query: str
     expected: tuple[str, ...]
     kind: str
+    excerpt_contains: str | None = None
 
 
 ARTICLES: tuple[EvalArticle, ...] = (
@@ -370,19 +377,34 @@ ARTICLES: tuple[EvalArticle, ...] = (
 )
 
 
+# Boundary cases deliberately put unique evidence beyond the old embedding/token
+# window and in a short final paragraph. They are synthetic regression fixtures,
+# not a held-out measure of real user retrieval quality.
+ARTICLES += (
+    EvalArticle("long-tail-evidence", "野外观察手记", "https://reader.eval/long-tail",
+                ("boundary",), ("这份手记先记录沿途地形、天气和日常观察。" * 90,
+                                 "最后确认：帝企鹅育雏地点在浮冰裂隙东侧。")),
+    EvalArticle("symbol-cpp", "程序设计补充笔记", "https://reader.eval/cpp",
+                ("boundary",), ("C++ 使用析构函数自动释放资源，可以把文件句柄的生存期绑定到对象。",)),
+    EvalArticle("short-go", "并发程序随记", "https://reader.eval/golang",
+                ("boundary",), ("Go 通过 goroutine 和 channel 协作完成并发任务。",)),
+    EvalArticle("short-go-decoy", "搜索引擎历史", "https://reader.eval/search-history",
+                ("boundary",), ("Google 是一家提供互联网搜索服务的公司。",)),
+)
+
 QUERIES: tuple[EvalQuery, ...] = (
-    EvalQuery("放假", ("work-ai-vacation",), "keyword"),
+    EvalQuery("放假", ("work-ai-vacation", "semantic-short-word"), "keyword"),
     EvalQuery("今天可以放假吗", ("work-ai-vacation",), "keyword"),
     EvalQuery("AI 提高效率以后能不能少上一天班", ("work-ai-vacation", "english-ai-workweek"), "rewrite"),
     EvalQuery("工作几小时完成一周任务", ("work-ai-vacation", "english-ai-workweek"), "rewrite"),
-    EvalQuery("员工因为 AI 变高效后应该获得什么福利", ("work-ai-vacation",), "rewrite"),
+    EvalQuery("员工因为 AI 变高效后应该获得什么福利", ("work-ai-vacation", "english-ai-workweek"), "rewrite"),
     EvalQuery("rsync 为什么有人争论", ("rsync-debate",), "rewrite"),
     EvalQuery("老工具兼容性和现代替代方案", ("rsync-debate",), "rewrite"),
     EvalQuery("PostgreSQL 怎么做相似内容搜索", ("pgvector-search",), "rewrite"),
     EvalQuery("向量数据库能不能放在本地跑", ("pgvector-search", "english-vector-db", "local-llm-cost"), "rewrite"),
     EvalQuery("本地模型不联网搜索文章", ("local-llm-cost", "english-vector-db"), "rewrite"),
     EvalQuery("RSS 文章怎么管理未读已读", ("rss-reading-flow",), "rewrite"),
-    EvalQuery("稍后读和订阅源整理", ("rss-reading-flow",), "rewrite"),
+    EvalQuery("稍后读和订阅源整理", ("rss-reading-flow", "mixed-rss-ai"), "rewrite"),
     EvalQuery("iPhone 防晕车功能", ("apple-motion-cues",), "rewrite"),
     EvalQuery("车辆运动提示是什么", ("apple-motion-cues",), "rewrite"),
     EvalQuery("短词为什么搜不到语义结果", ("semantic-short-word",), "rewrite"),
@@ -390,23 +412,35 @@ QUERIES: tuple[EvalQuery, ...] = (
     EvalQuery("珠海音乐节怎么安排行程", ("vac-travel-plan",), "rewrite"),
     EvalQuery("番茄炒蛋", ("recipe-tomato-eggs",), "keyword"),
     EvalQuery("how AI changes the workweek", ("english-ai-workweek", "work-ai-vacation"), "english"),
-    EvalQuery("local vector database for semantic search", ("english-vector-db", "pgvector-search"), "english"),
+    EvalQuery("local vector database for semantic search", ("english-vector-db", "pgvector-search", "local-llm-cost"), "english"),
     EvalQuery("RSS summary workflow with AI", ("mixed-rss-ai", "rss-reading-flow"), "english"),
     EvalQuery("写测试数据验证搜索质量", ("python-testing", "semantic-short-word"), "rewrite"),
     EvalQuery("浏览器里验证搜索和筛选", ("browser-automation",), "rewrite"),
     EvalQuery("地下停车场潮湿除味方案", tuple(), "unrelated"),
 )
 
+QUERIES += (
+    EvalQuery("帝企鹅育雏", ("long-tail-evidence",), "tail", "帝企鹅育雏"),
+    EvalQuery("浮冰裂隙东侧", ("long-tail-evidence",), "tail", "浮冰裂隙东侧"),
+    EvalQuery("C++", ("symbol-cpp",), "short", "C++"),
+    EvalQuery("Go", ("short-go",), "short", "Go"),
+    EvalQuery("海水淡化膜清洗配方", (), "unrelated"),
+    EvalQuery("月球玄武岩同位素测年", (), "unrelated"),
+    EvalQuery("不存在的编号 ZXQ-947213", (), "unrelated"),
+)
+
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Seed and run Reader semantic search evaluation.")
     parser.add_argument("command", choices=("seed", "run", "seed-and-run"))
+    parser.add_argument("--fail-on-regression", action="store_true",
+                        help="Write reports, then exit nonzero if any case fails.")
     args = parser.parse_args()
 
     if args.command in {"seed", "seed-and-run"}:
         seed()
     if args.command in {"run", "seed-and-run"}:
-        run()
+        run(fail_on_regression=args.fail_on_regression)
 
 
 def seed() -> None:
@@ -422,6 +456,10 @@ def seed() -> None:
     )
     provider = LocalEmbeddingProvider(settings)
     provider.preload()
+    service = ArchiveTaskService(
+        repository, SingleFileArchiver(settings), YtDlpDownloader(settings),
+        BrowserOpener(settings), provider, preparer,
+    )
 
     seeded = 0
     chunks_total = 0
@@ -443,36 +481,31 @@ def seed() -> None:
         repository.mark_succeeded(article.task_id)
         repository.replace_task_tags(article.task_id, list(article.tags))
 
-        prepared = preparer.prepare(path)
-        if prepared is None:
-            raise RuntimeError(f"Failed to prepare semantic chunks for {article.task_id}")
-        texts = semantic_texts_for_embedding(article.title, prepared.chunks)
-        embeddings = embed_batches(provider, texts, settings.semantic_batch_size)
-        if len(embeddings) != len(prepared.chunks):
-            raise RuntimeError(f"Embedding count mismatch for {article.task_id}")
-        repository.replace_semantic_chunks(
-            article.task_id,
-            provider.model_name,
-            settings.semantic_embedding_dimensions,
-            settings.semantic_text_version,
-            prepared.document_hash,
-            prepared.chunks,
-            embeddings,
+        # Exercise the same text extraction and token-aware indexing path as
+        # production, including keyword-only operation with embeddings disabled.
+        service._index_task_semantics(article.task_id)
+        document = repository.get_search_document(article.task_id)
+        if document is None or document.status != "ready":
+            raise RuntimeError(f"Failed to index searchable text for {article.task_id}")
+        index = repository.semantic_index_record(
+            article.task_id, provider.model_name, settings.semantic_text_version,
         )
+        if settings.semantic_search_enabled and (index is None or index.status != "indexed"):
+            raise RuntimeError(f"Failed to index embeddings for {article.task_id}")
         seeded += 1
-        chunks_total += len(prepared.chunks)
+        chunks_total += index.chunk_count if index is not None else 0
 
     print(json.dumps({"seeded_articles": seeded, "semantic_chunks": chunks_total}, ensure_ascii=False))
 
 
-def run() -> None:
+def run(*, fail_on_regression: bool = False) -> None:
     base_url = os.environ.get("READER_EVAL_BASE_URL", "http://127.0.0.1:8000").rstrip("/")
     username = os.environ.get("READER_EVAL_USERNAME", "admin")
     password = os.environ.get("READER_EVAL_PASSWORD", "change-me")
     results_dir = Path(os.environ.get("READER_EVAL_RESULTS_DIR", "/app/eval-results"))
     results_dir.mkdir(parents=True, exist_ok=True)
 
-    client = EvalHttpClient(base_url)
+    client = EvalHttpClient(base_url, os.environ.get("READER_EVAL_SEARCH_ENDPOINT", "/api/v1/archive-search"))
     client.login(username, password)
 
     case_results = []
@@ -482,13 +515,18 @@ def run() -> None:
         results = client.search(query.query)
         duration_ms = round((time.perf_counter() - started) * 1000, 2)
         durations.append(duration_ms)
-        case_results.append(evaluate_case(query, results, duration_ms))
+        case = evaluate_case(query, results, duration_ms)
+        case["search_state"] = client.last_search_state
+        case_results.append(case)
 
     summary = build_summary(case_results, durations)
     payload = {
         "generated_at": datetime.now(UTC).isoformat(),
         "article_count": len(ARTICLES),
         "query_count": len(QUERIES),
+        "suite": "synthetic-regression-v3-reviewed",
+        "search_endpoint": client.search_endpoint,
+        "relevance_policy": "Only listed expected articles are judged relevant; failures require review, not relabeling to improve scores.",
         "summary": summary,
         "cases": case_results,
     }
@@ -498,11 +536,36 @@ def run() -> None:
     )
     (results_dir / "semantic-eval.md").write_text(render_markdown(payload), encoding="utf-8")
     print(json.dumps(summary, ensure_ascii=False))
+    if fail_on_regression and summary["failed_cases"]:
+        raise SystemExit(1)
+
+
+def assert_isolated_seed_target(settings: Settings) -> None:
+    """Fail closed before touching a database or deleting any archive file."""
+    url = make_url(settings.database_url)
+    allowed_archive_paths = {
+        Path("/app/eval-data/archive"),
+        Path(__file__).resolve().parents[2] / ".local_eval/reader-semantic/data/app/archive",
+    }
+    if (os.environ.get("READER_EVAL_ALLOW_RESET") != "isolated-semantic-eval"
+            or url.database != "reader_semantic_eval"
+            or url.host not in {"eval-db", "127.0.0.1", "localhost"}
+            or settings.archive_dir.resolve() not in allowed_archive_paths
+            or settings.archive_dir.is_symlink()):
+        raise RuntimeError(
+            "Refusing destructive seed: use compose.semantic-eval.yaml with its dedicated "
+            "eval-db/reader_semantic_eval database, /app/eval-data/archive directory, "
+            "and READER_EVAL_ALLOW_RESET=isolated-semantic-eval."
+        )
 
 
 def reset_database(settings: Settings) -> None:
+    assert_isolated_seed_target(settings)
     engine = get_engine(settings.database_url)
     with Session(engine) as session:
+        existing_ids = session.execute(text("SELECT id FROM reader_archive_tasks")).scalars()
+        if set(existing_ids) - {article.task_id for article in ARTICLES}:
+            raise RuntimeError("Refusing reset: the database contains non-evaluation archives.")
         session.execute(
             text(
                 """
@@ -522,19 +585,8 @@ def reset_database(settings: Settings) -> None:
         session.commit()
 
     if settings.archive_dir.exists():
-        for path in settings.archive_dir.glob("*.html"):
-            path.unlink(missing_ok=True)
-
-
-def embed_batches(
-    provider: LocalEmbeddingProvider,
-    chunks: list[str],
-    batch_size: int,
-) -> list[list[float]]:
-    embeddings: list[list[float]] = []
-    for index in range(0, len(chunks), batch_size):
-        embeddings.extend(provider.embed(chunks[index : index + batch_size]))
-    return embeddings
+        for article in ARTICLES:
+            (settings.archive_dir / f"{article.task_id}.html").unlink(missing_ok=True)
 
 
 def render_article_html(article: EvalArticle) -> str:
@@ -549,8 +601,10 @@ def render_article_html(article: EvalArticle) -> str:
 
 
 class EvalHttpClient:
-    def __init__(self, base_url: str) -> None:
+    def __init__(self, base_url: str, search_endpoint: str = "/api/v1/archive-search") -> None:
         self.base_url = base_url
+        self.search_endpoint = search_endpoint
+        self.last_search_state: dict[str, Any] = {}
         self.cookie_jar = CookieJar()
         self.opener = urllib.request.build_opener(
             urllib.request.HTTPCookieProcessor(self.cookie_jar)
@@ -574,10 +628,19 @@ class EvalHttpClient:
                 "q": query,
             }
         )
-        response = self.request_json("GET", f"/api/v1/archive-tasks?{params}")
-        if not isinstance(response, list):
-            raise RuntimeError("Search endpoint returned a non-list response.")
-        return response
+        response = self.request_json("GET", f"{self.search_endpoint}?{params}")
+        self.last_search_state = {
+            key: response[key] for key in ("mode", "coverage", "total", "total_is_exact")
+            if isinstance(response, dict) and key in response
+        }
+        # Keep the old array format readable for baseline comparisons. The current
+        # endpoint returns a page; the first 50 are sufficient for our @10 metrics.
+        items = response.get("items") if isinstance(response, dict) else response
+        if not isinstance(items, list) or any(
+            not isinstance(item, dict) or "task_id" not in item for item in items
+        ):
+            raise RuntimeError("Search endpoint returned invalid result items.")
+        return items
 
     def request_json(
         self,
@@ -611,66 +674,106 @@ def evaluate_case(
     results: list[dict[str, Any]],
     duration_ms: float,
 ) -> dict[str, Any]:
+    ranked_ids = [str(item["task_id"]) for item in results[:10]]
     top_results = [
         {
             "rank": index + 1,
             "task_id": str(item["task_id"]),
             "title": str(item.get("display_title") or ""),
             "excerpt": str((item.get("search_match") or {}).get("excerpt") or ""),
+            "kind": (item.get("search_match") or {}).get("kind"),
+            "score": (item.get("search_match") or {}).get("score"),
+            "strength": (item.get("search_match") or {}).get("strength"),
         }
-        for index, item in enumerate(results[:5])
+        for index, item in enumerate(results[:10])
     ]
-    top_ids = [item["task_id"] for item in top_results]
+    relevant = set(query.expected)
     expected_ranks = {
-        expected_id: (top_ids.index(expected_id) + 1 if expected_id in top_ids else None)
-        for expected_id in query.expected
+        task_id: ranked_ids.index(task_id) + 1 if task_id in ranked_ids else None
+        for task_id in query.expected
     }
-
+    first_relevant = next((i + 1 for i, task_id in enumerate(ranked_ids)
+                           if task_id in relevant), None)
+    # Empty result slots do not count as irrelevant: returning one good article
+    # should beat filling the screen with four weak guesses. Report recall too.
+    seen: set[str] = set()
+    gains = []
+    for task_id in ranked_ids:
+        gains.append(int(task_id in relevant and task_id not in seen))
+        seen.add(task_id)
+    precision = sum(gains[:5]) / min(5, len(ranked_ids)) if ranked_ids else 0.0
+    recall = len(relevant.intersection(ranked_ids[:5])) / len(relevant) if relevant else 0.0
+    dcg = sum(gain / math.log2(index + 2) for index, gain in enumerate(gains))
+    ideal = sum(1 / math.log2(index + 2) for index in range(min(10, len(relevant))))
+    known_target = query.kind in {"keyword", "tail", "short"}
+    primary_first = bool(ranked_ids and relevant and (
+        ranked_ids[0] == query.expected[0] if known_target else ranked_ids[0] in relevant
+    ))
+    excerpt_supported = None
+    if query.excerpt_contains:
+        primary = next((item for item in top_results if item["task_id"] == query.expected[0]), None)
+        excerpt_supported = bool(primary and query.excerpt_contains.casefold() in primary["excerpt"].casefold())
+    failures = []
     if query.kind == "unrelated":
-        passed = len(top_results) == 0
-        reason = "no results" if passed else "unexpected results"
-    elif query.kind == "keyword":
-        passed = bool(top_results and top_results[0]["task_id"] == query.expected[0])
-        reason = "primary result is first" if passed else "primary result is not first"
+        if results:
+            failures.append("unexpected results for a no-answer query")
     else:
-        top3 = set(top_ids[:3])
-        passed = all(expected_id in top3 for expected_id in query.expected)
-        reason = "all expected results are in top 3" if passed else "expected result missing from top 3"
-
+        if not primary_first:
+            failures.append("primary result is not first" if known_target else "first result is not relevant")
+        if recall < 1:
+            failures.append("expected result missing from top 5")
+        if precision < 1:
+            failures.append("irrelevant or duplicate result in top 5")
+        if excerpt_supported is False:
+            failures.append("excerpt does not contain the expected source evidence")
     return {
         "query": query.query,
         "kind": query.kind,
         "expected": list(query.expected),
         "expected_ranks": expected_ranks,
         "duration_ms": duration_ms,
-        "passed": passed,
-        "reason": reason,
+        "passed": not failures,
+        "reason": "; ".join(failures) or "all relevance and evidence checks passed",
+        "primary_first": primary_first,
+        "intent": "known-target" if known_target else "topic-query",
+        "precision_at_5": round(precision, 4),
+        "recall_at_5": round(recall, 4),
+        "reciprocal_rank_at_10": round(1 / first_relevant, 4) if first_relevant else 0.0,
+        "ndcg_at_10": round(dcg / ideal, 4) if ideal else 0.0,
+        "excerpt_supported": excerpt_supported,
         "top_results": top_results,
     }
 
 
 def build_summary(case_results: list[dict[str, Any]], durations: list[float]) -> dict[str, Any]:
     expected_cases = [case for case in case_results if case["kind"] != "unrelated"]
-    top1_hits = 0
-    top3_hits = 0
-    for case in expected_cases:
-        expected = case["expected"]
-        top_ids = [result["task_id"] for result in case["top_results"]]
-        if expected and top_ids and top_ids[0] == expected[0]:
-            top1_hits += 1
-        if expected and expected[0] in top_ids[:3]:
-            top3_hits += 1
-
     unrelated_cases = [case for case in case_results if case["kind"] == "unrelated"]
-    unrelated_false_positives = sum(1 for case in unrelated_cases if case["top_results"])
-    passed_cases = sum(1 for case in case_results if case["passed"])
+    evidence_cases = [case for case in case_results if case["excerpt_supported"] is not None]
+    def mean(values: list[float]) -> float:
+        return round(sum(values) / len(values), 4) if values else 0.0
+
+    unrelated_false_positives = sum(bool(case["top_results"]) for case in unrelated_cases)
+    passed_cases = sum(case["passed"] for case in case_results)
     return {
         "passed_cases": passed_cases,
         "failed_cases": len(case_results) - passed_cases,
-        "top1_accuracy": round(top1_hits / len(expected_cases), 4) if expected_cases else 0,
-        "top3_accuracy": round(top3_hits / len(expected_cases), 4) if expected_cases else 0,
+        "top1_accuracy": mean([float(case["primary_first"]) for case in expected_cases]),
+        "top3_accuracy": mean([float(any(
+            rank is not None and rank <= 3 for task_id, rank in case["expected_ranks"].items()
+            if case["intent"] != "known-target" or task_id == case["expected"][0]
+        )) for case in expected_cases]),
+        "precision_at_5": mean([case["precision_at_5"] for case in expected_cases]),
+        "recall_at_5": mean([case["recall_at_5"] for case in expected_cases]),
+        "mrr_at_10": mean([case["reciprocal_rank_at_10"] for case in expected_cases]),
+        "ndcg_at_10": mean([case["ndcg_at_10"] for case in expected_cases]),
         "unrelated_false_positives": unrelated_false_positives,
+        "unrelated_false_positive_rate": round(unrelated_false_positives / len(unrelated_cases), 4) if unrelated_cases else 0.0,
+        "evidence_support_rate": mean([float(case["excerpt_supported"]) for case in evidence_cases]),
         "average_duration_ms": round(sum(durations) / len(durations), 2) if durations else 0,
+        "p95_duration_ms": sorted(durations)[math.ceil(len(durations) * .95) - 1] if durations else 0,
+        "by_kind": {kind: {"passed": sum(case["passed"] for case in case_results if case["kind"] == kind),
+                            "count": sum(case["kind"] == kind for case in case_results)}
+                    for kind in sorted({case["kind"] for case in case_results})},
     }
 
 
@@ -687,6 +790,14 @@ def render_markdown(payload: dict[str, Any]) -> str:
         f"- Top 1 accuracy: `{summary['top1_accuracy']}`",
         f"- Top 3 accuracy: `{summary['top3_accuracy']}`",
         f"- Unrelated false positives: `{summary['unrelated_false_positives']}`",
+        f"- Precision among returned top 5: `{summary['precision_at_5']}`",
+        f"- Recall at 5: `{summary['recall_at_5']}`",
+        f"- MRR at 10: `{summary['mrr_at_10']}`",
+        f"- NDCG at 10: `{summary['ndcg_at_10']}`",
+        f"- Expected excerpt support: `{summary['evidence_support_rate']}`",
+        f"- p95 duration: `{summary['p95_duration_ms']} ms`",
+        "- Synthetic regression suite; these scores are not held-out real-world quality estimates.",
+        "- Only explicitly expected articles count as relevant. Review judgments before using this as a release gate.",
         f"- Average duration: `{summary['average_duration_ms']} ms`",
         "",
         "| Query | Expected | Top results | Pass | Reason |",
