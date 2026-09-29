@@ -13,6 +13,14 @@ import { Input } from "./ui/input";
 
 export type AppDialogRequest =
   | {
+      kind: "rearchive";
+      title: string;
+      message: string;
+      confirmLabel?: string;
+      cancelLabel?: string;
+      resolve: (value: { prepareManually: boolean } | null) => void;
+    }
+  | {
       kind: "confirm";
       title: string;
       message: string;
@@ -42,10 +50,12 @@ export function AppDialog({ request, onClose }: AppDialogProps): JSX.Element | n
   const cancelButtonRef = useRef<HTMLButtonElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [inputValue, setInputValue] = useState("");
+  const [prepareManually, setPrepareManually] = useState(false);
 
   useEffect(() => {
     if (!request) return;
     setInputValue("");
+    setPrepareManually(false);
     window.requestAnimationFrame(() => {
       if (request.kind === "input") inputRef.current?.focus();
       else cancelButtonRef.current?.focus();
@@ -76,6 +86,8 @@ export function AppDialog({ request, onClose }: AppDialogProps): JSX.Element | n
       const value = inputValue.trim();
       if (!value || (request.minLength && value.length < request.minLength)) return;
       request.resolve(value);
+    } else if (request.kind === "rearchive") {
+      request.resolve({ prepareManually });
     } else {
       request.resolve(true);
     }
@@ -135,6 +147,14 @@ export function AppDialog({ request, onClose }: AppDialogProps): JSX.Element | n
                 onChange={(event) => setInputValue(event.target.value)}
               />
               {inputTooShort ? <span>至少 {request.minLength} 位</span> : null}
+            </label>
+          ) : null}
+
+          {request.kind === "rearchive" ? (
+            <label className="capture-manual-option">
+              <input type="checkbox" checked={prepareManually} onChange={(event) => setPrepareManually(event.target.checked)} />
+              <span>保存前手动处理</span>
+              <span className="capture-manual-hint">先关闭弹窗、展开内容，再确认保存</span>
             </label>
           ) : null}
 

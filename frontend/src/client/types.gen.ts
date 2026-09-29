@@ -278,6 +278,13 @@ export type ArchiveTaskRead = {
 };
 
 /**
+ * ArchiveTaskRearchive
+ */
+export type ArchiveTaskRearchive = {
+  prepare_manually?: boolean;
+};
+
+/**
  * ArchiveTaskResult
  */
 export type ArchiveTaskResult = {
@@ -1609,7 +1616,7 @@ export type ArchiveTasksMarkArchiveTaskReadResponse =
   ArchiveTasksMarkArchiveTaskReadResponses[keyof ArchiveTasksMarkArchiveTaskReadResponses];
 
 export type ArchiveTasksRearchiveTaskData = {
-  body?: never;
+  body?: ArchiveTaskRearchive | null;
   path: {
     /**
      * Task Id

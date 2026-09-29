@@ -212,15 +212,17 @@ export async function markArchiveTaskRead(taskId: string): Promise<void> {
   await readGenerated(archiveTasksMarkArchiveTaskRead({ path: { task_id: taskId } }));
 }
 
-export async function rearchiveTask(taskId: string): Promise<ArchiveTaskRead> {
+export async function rearchiveTask(taskId: string, prepareManually = false): Promise<ArchiveTaskRead> {
   const url = client.buildUrl({
     url: "/api/v1/archive-tasks/{task_id}/rearchive",
     path: { task_id: taskId },
   });
   const response = await fetch(url, {
     method: "POST",
+    body: JSON.stringify({ prepare_manually: prepareManually }),
     headers: {
       Authorization: `Bearer ${getAccessToken()}`,
+      "Content-Type": "application/json",
     },
   });
   if (!response.ok) {

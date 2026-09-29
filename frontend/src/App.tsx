@@ -386,16 +386,18 @@ export function MainApp(): JSX.Element {
   }
 
   async function rearchiveTask(taskId: string): Promise<void> {
-    const confirmed = await askConfirm({
+    const options = await new Promise<{ prepareManually: boolean } | null>((resolve) => setDialogRequest({
+      kind: "rearchive",
+      resolve,
       title: "重新归档",
       message: "这会替换当前条目的归档文件，名称、标签和已读状态会保留。",
       confirmLabel: "重新归档",
-    });
-    if (!confirmed) return;
+    }));
+    if (!options) return;
     try {
-      const updated = await rearchiveTaskRequest(taskId);
+      const updated = await rearchiveTaskRequest(taskId, options.prepareManually);
       setSelectedTaskId(updated.task_id);
-      showToast("已开始重新归档");
+      showToast(options.prepareManually ? "正在打开网页，等待你处理后保存" : "已开始重新归档");
       await invalidateArchiveData();
     } catch (error) {
       showToast(error instanceof Error ? error.message : "重新归档失败");
