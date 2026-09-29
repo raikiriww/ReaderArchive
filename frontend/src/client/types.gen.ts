@@ -109,6 +109,10 @@ export type ArchiveTagRead = {
  */
 export type ArchiveTaskCreate = {
   /**
+   * Prepare Manually
+   */
+  prepare_manually?: boolean;
+  /**
    * Url
    */
   url: string;
@@ -512,6 +516,7 @@ export type ManualActionRead = {
 export enum ManualActionResume {
   RETRY_PAGE = "retry_page",
   CONTINUE_VIDEO = "continue_video",
+  CONTINUE_ARCHIVE = "continue_archive",
 }
 
 /**

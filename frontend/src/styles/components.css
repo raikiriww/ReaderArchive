@@ -1631,3 +1631,28 @@ button:disabled,
     padding: 16px;
   }
 }
+
+/* Keep the manual preparation choice separate from the address field. */
+.capture-manual-option {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  color: var(--text);
+  font-size: 12px;
+  cursor: pointer;
+}
+.capture-form .capture-manual-option input {
+  width: 15px;
+  height: 15px;
+  padding: 0;
+  margin: 0;
+  accent-color: var(--accent);
+}
+.capture-manual-hint { color: var(--muted); }
+@media (max-width: 760px) {
+  .capture-manual-hint { flex-basis: 100%; margin-left: 21px; }
+}
+
+.waiting-line { color: var(--muted); font-size: 12px; }

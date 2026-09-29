@@ -25,9 +25,9 @@ class Settings(BaseSettings):
     chrome_path: str = "/usr/bin/google-chrome"
     use_xvfb: bool = True
     browser_display: str = ":1"
-    browser_load_max_time_ms: int = 20000
+    browser_load_max_time_ms: int = 120000
     browser_capture_max_time_ms: int = 60000
-    archive_timeout_seconds: int = 120
+    archive_timeout_seconds: int = 240
     video_download_timeout_seconds: int = 600
     desktop_url: str = "/browser/"
     desktop_proxy_path: str = "/browser/"

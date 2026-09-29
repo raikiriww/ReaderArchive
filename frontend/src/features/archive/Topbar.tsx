@@ -8,7 +8,7 @@ interface TopbarProps {
   config: AppConfig;
   currentUser: User | null;
   draftUrl: string;
-  onSubmitUrl: (url: string) => Promise<void>;
+  onSubmitUrl: (url: string, prepareManually: boolean) => Promise<void>;
   onOpenSettings: () => void;
   onLogout: () => void;
   onDraftConsumed: () => void;
@@ -30,6 +30,7 @@ export function Topbar({
 }: TopbarProps): JSX.Element {
   const [url, setUrl] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [prepareManually, setPrepareManually] = useState(false);
 
   useEffect(() => {
     if (!draftUrl) return;
@@ -43,7 +44,8 @@ export function Topbar({
     if (!nextUrl) return;
     setSubmitting(true);
     try {
-      await onSubmitUrl(nextUrl);
+      await onSubmitUrl(nextUrl, prepareManually);
+      setPrepareManually(false);
       setUrl("");
     } catch {
       // Keep the address available for retry; the caller presents the error.
@@ -73,8 +75,13 @@ export function Topbar({
           onChange={(event) => setUrl(event.target.value)}
         />
         <button disabled={submitting} type="submit">
-          {submitting ? "保存中" : "保存网页"}
+          {submitting ? "提交中" : prepareManually ? "打开并等待处理" : "保存网页"}
         </button>
+        <label className="capture-manual-option">
+          <input type="checkbox" checked={prepareManually} disabled={submitting} onChange={(event) => setPrepareManually(event.target.checked)} />
+          <span>保存前手动处理</span>
+          <span className="capture-manual-hint">先关闭弹窗、展开内容，再确认保存</span>
+        </label>
       </form>
       <div className="topbar-actions" role="group" aria-label="全局操作">
         <button className={`text-button search-entry ${searchOpen ? "active" : ""}`} type="button" onClick={onOpenSearch}><Search size={16} /><span>搜索存档</span><kbd>⌘ K</kbd></button>

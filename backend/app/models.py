@@ -250,6 +250,7 @@ class ManualActionTarget(StrEnum):
 class ManualActionResume(StrEnum):
     RETRY_PAGE = "retry_page"
     CONTINUE_VIDEO = "continue_video"
+    CONTINUE_ARCHIVE = "continue_archive"
 
 
 class BrowserTabState(StrEnum):
@@ -273,6 +274,7 @@ class ManualActionResumeRequest(BaseModel):
 
 
 class ArchiveTaskCreate(BaseModel):
+    prepare_manually: bool = False
     url: HttpUrl = PydanticField(..., examples=["https://www.v2ex.com/"])
 
 

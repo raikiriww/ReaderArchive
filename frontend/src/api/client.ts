@@ -183,8 +183,8 @@ export async function listArchiveTasks(options: {
   );
 }
 
-export async function createArchiveTask(url: string): Promise<ArchiveTaskCreated> {
-  return readGenerated<ArchiveTaskCreated>(archiveTasksCreateArchiveTask({ body: { url } }));
+export async function createArchiveTask(url: string, prepareManually = false): Promise<ArchiveTaskCreated> {
+  return readGenerated<ArchiveTaskCreated>(archiveTasksCreateArchiveTask({ body: { url, prepare_manually: prepareManually } }));
 }
 
 export async function listArchiveTags(): Promise<ArchiveTagRead[]> {

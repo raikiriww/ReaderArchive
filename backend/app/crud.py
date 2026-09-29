@@ -391,6 +391,7 @@ class ArchiveTaskRepository:
         source_feed_id: str | None = None,
         source_title: str | None = None,
         entry_title: str | None = None,
+        manual_actions: list[ManualActionRead] | None = None,
     ) -> ArchiveTaskRead:
         now = utc_now()
         task = ArchiveTask(
@@ -402,6 +403,10 @@ class ArchiveTaskRepository:
             created_at=now,
             updated_at=now,
             current_step="queued",
+            manual_actions=[
+                action.model_dump(mode="json", exclude={"browser_tab_state"})
+                for action in manual_actions or []
+            ],
             source_type=str(source_type),
             source_feed_id=source_feed_id,
             source_title=source_title,
@@ -991,6 +996,25 @@ class ArchiveTaskRepository:
             video_error=video_error,
             page_error=page_error,
         )
+
+    def claim_manual_action(self, task_id: str, action_code: str) -> bool:
+        """Only one caller may resume a waiting action, even across API workers."""
+        with self._session() as session:
+            task = session.exec(
+                select(ArchiveTask).where(ArchiveTask.id == task_id).with_for_update()
+            ).first()
+            if task is None or task.status != ArchiveTaskStatus.MANUAL_ACTION_REQUIRED:
+                return False
+            if not any(a.get("code") == action_code for a in task.manual_actions):
+                return False
+            task.manual_actions = [a for a in task.manual_actions if a.get("code") != action_code]
+            task.status = ArchiveTaskStatus.RUNNING
+            task.current_step = "page"
+            task.started_at = utc_now()
+            task.updated_at = utc_now()
+            session.add(task)
+            session.commit()
+            return True
 
     def update_manual_actions(
         self,

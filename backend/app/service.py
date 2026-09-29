@@ -149,7 +149,10 @@ class ArchiveTaskService:
         source_feed_id: str | None = None,
         source_title: str | None = None,
         entry_title: str | None = None,
+        prepare_manually: bool = False,
     ) -> ArchiveTaskRead:
+        if prepare_manually and not self.archiver.settings.browser_remote_debugging_url:
+            raise ValueError("保存前手动处理需要使用系统内置浏览器。")
         task_id = uuid4().hex
         output_file = f"{task_id}.html"
         task = self.repository.create(
@@ -161,6 +164,8 @@ class ArchiveTaskService:
             source_feed_id=source_feed_id,
             source_title=source_title,
             entry_title=entry_title,
+            # Persist the intent before enqueueing so a restart cannot skip preparation.
+            manual_actions=[self._preparation_action()] if prepare_manually else [],
         )
         await self.queue.put(task_id)
         return task
@@ -337,7 +342,8 @@ class ArchiveTaskService:
             if action.code != action_code
         ]
         page_error = task.result.page_error if task.result else None
-        self.repository.update_manual_actions(task_id, remaining_actions)
+        if not self.repository.claim_manual_action(task_id, action_code):
+            raise ValueError("这个任务已开始处理，请勿重复提交。")
         if action.resume == ManualActionResume.CONTINUE_VIDEO:
             self.repository.mark_running(task_id, current_step="video")
             worker = asyncio.create_task(
@@ -348,6 +354,8 @@ class ArchiveTaskService:
                     page_error,
                 )
             )
+        elif action.resume == ManualActionResume.CONTINUE_ARCHIVE:
+            worker = asyncio.create_task(self._save_task(task, preparation=action))
         elif action.resume == ManualActionResume.RETRY_PAGE:
             self.repository.mark_running(task_id, current_step="page")
             worker = asyncio.create_task(
@@ -638,54 +646,102 @@ class ArchiveTaskService:
                 created_task_count=created_task_count,
             )
 
+    @staticmethod
+    def _preparation_action() -> ManualActionRead:
+        return ManualActionRead(
+            code="page.prepare_manually",
+            kind=ManualActionKind.CONFIRMATION,
+            target=ManualActionTarget.PAGE,
+            resume=ManualActionResume.CONTINUE_ARCHIVE,
+            rule_id="page.prepare_manually",
+            message="请在处理页面关闭弹窗、展开需要的内容，完成后保存当前页面。等待期间不会自动保存。",
+        )
+
+    async def _prepare_task(self, task: ArchiveTaskRead) -> None:
+        self.repository.mark_running(task.task_id, current_step="page")
+        action = self._preparation_action()
+        try:
+            tab = await self.browser_opener.open(task.url)
+            if tab is None:
+                raise RuntimeError("浏览器未返回处理页面。")
+            self.repository.upsert_browser_tab_binding(
+                task.task_id, ManualActionTarget.PAGE, task.url, tab.target_id,
+                last_url=tab.url, owned_by_reader=True,
+            )
+        except Exception as exc:
+            action = action.model_copy(update={
+                "message": f"处理页面未能打开：{self._short_error(str(exc))}。请重新打开处理页面。",
+            })
+        self.repository.mark_manual_action_required(task.task_id, [action])
+
     async def _run_worker(self) -> None:
         while True:
             task_id = await self.queue.get()
-            task = self.repository.get(task_id)
-            if task is None:
-                self.queue.task_done()
-                continue
             try:
-                self.repository.mark_running(task_id, current_step="page+video")
-                page_job = asyncio.create_task(
-                    self._archive_page(task, f"{task_id}.html"),
-                )
-                video_job = asyncio.create_task(self._download_video(task.url, task_id))
-                page_outcome, video_result = await asyncio.gather(page_job, video_job)
-                video_file, video_title, video_error, needs_browser_login = video_result
-                manual_actions = list(page_outcome.manual_actions)
-                if needs_browser_login:
-                    manual_actions.append(self._video_login_action(video_error))
-                if manual_actions:
-                    self.repository.mark_manual_action_required(
-                        task_id,
-                        manual_actions,
-                        video_file=video_file,
-                        video_title=video_title,
-                        video_error=None if needs_browser_login else video_error,
-                        page_error=page_outcome.error,
-                    )
+                task = self.repository.get(task_id)
+                if task is None or task.status != ArchiveTaskStatus.QUEUED:
                     continue
-                page_error = page_outcome.error
-                if page_error and video_file is None:
-                    if video_error:
-                        raise RuntimeError(
-                            f"网页保存失败：{page_error}；视频下载失败：{video_error}",
-                        )
-                    raise RuntimeError(page_error)
-                self.repository.mark_succeeded(
-                    task_id,
-                    video_file=video_file,
-                    video_title=video_title,
-                    video_error=video_error,
-                    page_error=page_error,
-                )
-                if page_error is None:
-                    await self._enqueue_semantic_task(task_id)
+                if any(a.code == "page.prepare_manually" for a in task.manual_actions):
+                    await self._prepare_task(task)
+                else:
+                    await self._save_task(task)
             except Exception as exc:
                 self.repository.mark_failed(task_id, str(exc))
             finally:
                 self.queue.task_done()
+
+    async def _save_task(
+        self, task: ArchiveTaskRead, preparation: ManualActionRead | None = None,
+    ) -> None:
+        task_id = task.task_id
+        try:
+            self.repository.mark_running(task_id, current_step="page+video")
+            page_job = asyncio.create_task(
+                self._archive_page(
+                    task, f"{task_id}.html",
+                    reuse_existing_tab=preparation is not None,
+                    manual_action=preparation,
+                ),
+            )
+            video_job = asyncio.create_task(self._download_video(task.url, task_id))
+            page_outcome, video_result = await asyncio.gather(page_job, video_job)
+            video_file, video_title, video_error, needs_browser_login = video_result
+            manual_actions = list(page_outcome.manual_actions)
+            if preparation is not None and page_outcome.error and not manual_actions:
+                manual_actions.append(preparation.model_copy(update={
+                    "message": f"保存未完成：{page_outcome.error}。页面已保留，可以处理后再试。",
+                    "resume": ManualActionResume.RETRY_PAGE,
+                }))
+            if needs_browser_login:
+                manual_actions.append(self._video_login_action(video_error))
+            if manual_actions:
+                self.repository.mark_manual_action_required(
+                    task_id,
+                    manual_actions,
+                    video_file=video_file,
+                    video_title=video_title,
+                    video_error=None if needs_browser_login else video_error,
+                    page_error=page_outcome.error,
+                )
+                return
+            page_error = page_outcome.error
+            if page_error and video_file is None:
+                if video_error:
+                    raise RuntimeError(
+                        f"网页保存失败：{page_error}；视频下载失败：{video_error}",
+                    )
+                raise RuntimeError(page_error)
+            self.repository.mark_succeeded(
+                task_id,
+                video_file=video_file,
+                video_title=video_title,
+                video_error=video_error,
+                page_error=page_error,
+            )
+            if page_error is None:
+                await self._enqueue_semantic_task(task_id)
+        except Exception as exc:
+            self.repository.mark_failed(task_id, str(exc))
 
     async def _run_rss_worker(self) -> None:
         while True:
@@ -774,7 +830,7 @@ class ArchiveTaskService:
     ) -> PageArchiveOutcome:
         output_path = self.archiver.settings.archive_dir / output_file
         browser_target_id: str | None = None
-        keep_browser_tab = False
+        keep_browser_tab = manual_action is not None and manual_action.code == "page.prepare_manually"
         try:
             if self.archiver.settings.browser_remote_debugging_url:
                 if reuse_existing_tab:
@@ -866,6 +922,7 @@ class ArchiveTaskService:
                     owned_by_reader=(binding.owned_by_reader if binding else True),
                 )
             if artifact.media_type == "application/pdf":
+                keep_browser_tab = False
                 return PageArchiveOutcome()
             inspection = await asyncio.to_thread(
                 self.site_rule_registry.inspect,
@@ -891,6 +948,7 @@ class ArchiveTaskService:
             )
             if self._should_update_entry_title(task, archived_title):
                 self.repository.update_entry_title(task.task_id, archived_title)
+            keep_browser_tab = False
         except Exception as exc:
             output_path.unlink(missing_ok=True)
             return PageArchiveOutcome(error=self._short_error(str(exc)))
@@ -1151,6 +1209,14 @@ class ArchiveTaskService:
                 manual_action=manual_action,
             )
             next_actions = [*remaining_actions, *page_outcome.manual_actions]
+            if (
+                manual_action.code == "page.prepare_manually"
+                and page_outcome.error
+                and not page_outcome.manual_actions
+            ):
+                next_actions.append(manual_action.model_copy(update={
+                    "message": f"保存未完成：{page_outcome.error}。页面已保留，可以处理后再试。",
+                }))
             if next_actions:
                 self.repository.mark_manual_action_required(
                     task.task_id,

@@ -88,6 +88,14 @@ describe("archive formatting helpers", () => {
   });
 });
 
+test("failed prepared capture does not claim a video was saved", () => {
+  const task = archiveTask({result: {file_name: null, download_url: null, view_url: null,
+    video_file_name: null, video_download_url: null, video_error: "no video", page_error: "capture failed"}});
+  const notices = taskNotices(task).map((notice) => notice.text);
+  expect(notices).toContain("网页未保存：capture failed");
+  expect(notices.some((text) => text.includes("视频已保存"))).toBe(false);
+});
+
 describe("tag helpers", () => {
   test("cleans tags and keeps only valid filters", () => {
     expect(cleanTag("  weekly   read  ")).toBe("weekly read");

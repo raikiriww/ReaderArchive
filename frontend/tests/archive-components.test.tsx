@@ -185,6 +185,23 @@ describe("archive detail panel", () => {
     expect(html).toContain("选择一条存档记录");
   });
 
+  test("offers save-current-page only when the prepared tab is available", () => {
+    const task = archiveTask({
+      status: "manual_action_required",
+      manual_actions: [{ code: "page.prepare_manually", kind: "confirmation", target: "page",
+        message: "请展开内容后保存", resume: "continue_archive", rule_id: "page.prepare_manually",
+        browser_tab_state: "available" }],
+    });
+    const ready = renderDetail(task);
+    expect(ready).toContain("等待手动处理");
+    expect(ready).toContain("处理完成，保存当前页面");
+    expect(ready).toContain("取消等待");
+    task.manual_actions[0].browser_tab_state = "missing";
+    const missing = renderDetail(task);
+    expect(missing).toContain("重新打开处理页面");
+    expect(missing).toMatch(/<button[^>]*disabled=""[^>]*>[\s\S]*?处理完成，保存当前页面/);
+  });
+
   test("renders task actions, files, tags, and login-required controls", () => {
     const html = renderDetail(
       archiveTask({
@@ -260,7 +277,7 @@ function renderDetail(task: Parameters<typeof DetailPanel>[0]["task"]): string {
       onRefreshFiles={noop}
       onUploadFile={noop}
       onDeleteTask={noop}
-      onResumeManualAction={noop}
+      onResumeManualAction={asyncNoop}
       onOpenBrowser={noop}
       onMarkRead={noop}
       onRearchiveTask={noop}

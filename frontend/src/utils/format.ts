@@ -87,7 +87,8 @@ export function taskNotices(task: ArchiveTask): Array<{ type: "error" | "warning
   const notices: Array<{ type: "error" | "warning"; text: string }> = [];
   if (task.error) notices.push({ type: "error", text: shortError(task.error) });
   if (task.result?.page_error) {
-    notices.push({ type: "warning", text: `视频已保存，网页未保存：${shortError(task.result.page_error)}` });
+    const prefix = task.result.video_file_name ? "视频已保存，网页未保存" : "网页未保存";
+    notices.push({ type: "warning", text: `${prefix}：${shortError(task.result.page_error)}` });
   }
   if (task.result?.video_error) {
     const prefix = task.result.file_name ? "网页已保存，视频未保存" : "视频未保存";
