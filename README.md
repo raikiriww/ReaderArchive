@@ -30,7 +30,8 @@ It packages a web app, an API service, PostgreSQL, SingleFile, yt-dlp, and a bro
 
 ## Preparing a page before saving
 
-Check **保存前手动处理** beside the URL field to open a page and wait before
+When creating an archive, or in the **重新归档** confirmation dialog, check
+**保存前手动处理** to open a page and wait before
 saving. Open the task's **切回处理页面** button to use the built-in browser,
 close popups, expand quotations, or load the content you need. Then click
 **处理完成，保存当前页面**. Reader captures that same tab without reloading

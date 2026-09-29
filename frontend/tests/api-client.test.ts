@@ -126,3 +126,21 @@ describe("search connection failures", () => {
     } finally { globalThis.fetch = originalFetch; }
   });
 });
+
+test("rearchive sends the manual choice and defaults to automatic", async () => {
+  const { rearchiveTask } = await import("../src/api/client");
+  const originalFetch = globalThis.fetch;
+  const choices: boolean[] = [];
+  globalThis.fetch = (async (_input: unknown, init?: RequestInit) => {
+    choices.push(JSON.parse(String(init?.body)).prepare_manually);
+    expect(new Headers(init?.headers).get("Content-Type")).toBe("application/json");
+    return Response.json({ task_id: "existing-task" });
+  }) as typeof fetch;
+  try {
+    await rearchiveTask("existing-task", true);
+    await rearchiveTask("existing-task");
+    expect(choices).toEqual([true, false]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});

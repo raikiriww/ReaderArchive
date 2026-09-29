@@ -151,3 +151,56 @@ def test_preparation_rejects_browser_without_tab_support(tmp_path: Path):
         response = client.post('/api/v1/archive-tasks', json={'url': URL, 'prepare_manually': True})
         assert response.status_code == 409
         assert '内置浏览器' in response.json()['detail']
+
+
+def test_rearchive_can_prepare_manually_and_preserves_metadata(tmp_path: Path):
+    with fake_chrome_server() as (chrome, browser_url):
+        settings = make_settings(tmp_path, browser_url)
+        settings.archive_dir.mkdir()
+        (settings.archive_dir / 'verified.marker').write_text('ready')
+        with TestClient(create_app(settings)) as client:
+            login_as_admin(client)
+            task_id = client.post('/api/v1/archive-tasks', json={'url': URL}).json()['task_id']
+            assert wait_for_finished(client, task_id)['status'] == 'succeeded'
+            assert client.patch(f'/api/v1/archive-tasks/{task_id}', json={'custom_title': 'My title', 'tags': ['keep']}).status_code == 200
+            assert client.post(f'/api/v1/archive-tasks/{task_id}/mark-read').status_code == 200
+            response = client.post(f'/api/v1/archive-tasks/{task_id}/rearchive', json={'prepare_manually': True})
+            assert response.status_code == 202
+            task = wait_for_finished(client, task_id)
+            assert task['status'] == 'manual_action_required'
+            assert task['custom_title'] == 'My title'
+            assert task['tags'] == ['keep']
+            assert task['is_read'] is True
+            assert len((settings.archive_dir / 'singlefile.calls').read_text().splitlines()) == 1
+            target = next(iter(chrome.tabs))
+            assert resume(client, task_id).status_code == 202
+            task = wait_for_finished(client, task_id)
+            assert task['status'] == 'succeeded'
+            assert task['custom_title'] == 'My title'
+            assert task['tags'] == ['keep']
+            assert task['is_read'] is True
+            calls = (settings.archive_dir / 'singlefile.calls').read_text().splitlines()
+            assert len(calls) == 2
+            assert f'--browser-target-id={target}' in calls[-1]
+            assert '--browser-skip-navigation=true' in calls[-1]
+            # Existing clients with no request body retain the automatic flow.
+            assert client.post(f'/api/v1/archive-tasks/{task_id}/rearchive').status_code == 202
+            assert wait_for_finished(client, task_id)['status'] == 'succeeded'
+
+
+def test_rearchive_rejects_unsupported_browser_before_removing_existing_file(tmp_path: Path):
+    with fake_chrome_server() as (_, browser_url):
+        settings = make_settings(tmp_path, browser_url)
+        settings.archive_dir.mkdir()
+        (settings.archive_dir / 'verified.marker').write_text('ready')
+        with TestClient(create_app(settings)) as client:
+            login_as_admin(client)
+            task_id = client.post('/api/v1/archive-tasks', json={'url': URL}).json()['task_id']
+            assert wait_for_finished(client, task_id)['status'] == 'succeeded'
+            saved = settings.archive_dir / f'{task_id}.html'
+            content = saved.read_bytes()
+            settings.browser_remote_debugging_url = None
+            response = client.post(f'/api/v1/archive-tasks/{task_id}/rearchive', json={'prepare_manually': True})
+            assert response.status_code == 409
+            assert saved.read_bytes() == content
+            assert client.get(f'/api/v1/archive-tasks/{task_id}').json()['status'] == 'succeeded'

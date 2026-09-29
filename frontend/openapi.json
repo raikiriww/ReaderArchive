@@ -1371,6 +1371,23 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/ArchiveTaskRearchive"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Payload"
+              }
+            }
+          }
+        },
         "responses": {
           "202": {
             "description": "Successful Response",
@@ -2489,6 +2506,17 @@
           "display_title"
         ],
         "title": "ArchiveTaskRead"
+      },
+      "ArchiveTaskRearchive": {
+        "properties": {
+          "prepare_manually": {
+            "type": "boolean",
+            "title": "Prepare Manually",
+            "default": false
+          }
+        },
+        "type": "object",
+        "title": "ArchiveTaskRearchive"
       },
       "ArchiveTaskResult": {
         "properties": {

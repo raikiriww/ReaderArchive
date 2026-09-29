@@ -268,7 +268,7 @@ class ArchiveTaskService:
     def mark_task_read(self, task_id: str) -> None:
         self.repository.mark_read(task_id)
 
-    async def rearchive_task(self, task_id: str) -> ArchiveTaskRead:
+    async def rearchive_task(self, task_id: str, prepare_manually: bool = False) -> ArchiveTaskRead:
         task = self.repository.get(task_id)
         if task is None:
             msg = "Archive task not found."
@@ -279,12 +279,16 @@ class ArchiveTaskService:
         }:
             msg = "Archive task is still running."
             raise RuntimeError(msg)
+        if prepare_manually and not self.archiver.settings.browser_remote_debugging_url:
+            raise RuntimeError("保存前手动处理需要使用系统内置浏览器。")
         await self._release_all_browser_tabs(task_id)
         files = list(self.archiver.settings.archive_dir.glob(f"{task_id}.*"))
         for path in files:
             if path.is_file():
                 path.unlink(missing_ok=True)
-        if not self.repository.requeue_for_rearchive(task_id):
+        if not self.repository.requeue_for_rearchive(
+            task_id, manual_actions=[self._preparation_action()] if prepare_manually else [],
+        ):
             msg = "Archive task not found."
             raise ValueError(msg)
         await self.queue.put(task_id)

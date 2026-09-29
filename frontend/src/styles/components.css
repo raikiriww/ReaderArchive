@@ -1643,7 +1643,7 @@ button:disabled,
   font-size: 12px;
   cursor: pointer;
 }
-.capture-form .capture-manual-option input {
+.capture-manual-option input {
   width: 15px;
   height: 15px;
   padding: 0;

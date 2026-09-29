@@ -757,6 +757,7 @@ export const archiveTasksRearchiveTask = <ThrowOnError extends boolean = false>(
     ],
     url: "/api/v1/archive-tasks/{task_id}/rearchive",
     ...options,
+    headers: { "Content-Type": "application/json", ...options?.headers },
   });
 };
 

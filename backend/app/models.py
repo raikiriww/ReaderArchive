@@ -278,6 +278,10 @@ class ArchiveTaskCreate(BaseModel):
     url: HttpUrl = PydanticField(..., examples=["https://www.v2ex.com/"])
 
 
+class ArchiveTaskRearchive(BaseModel):
+    prepare_manually: bool = False
+
+
 class ArchiveTaskCreated(BaseModel):
     task_id: str
     status: ArchiveTaskStatus

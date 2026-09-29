@@ -22,6 +22,7 @@ from app.models import (
     ArchiveTaskFileUpdate,
     ArchiveTaskListRead,
     ArchiveTaskRead,
+    ArchiveTaskRearchive,
     ArchiveTaskUpdate,
     ManualActionResumeRequest,
 )
@@ -243,10 +244,14 @@ def create_router() -> APIRouter:
         response_model=ArchiveTaskRead,
         status_code=status.HTTP_202_ACCEPTED,
     )
-    async def rearchive_task(task_id: str, request: Request) -> ArchiveTaskRead:
+    async def rearchive_task(
+        task_id: str, request: Request, payload: ArchiveTaskRearchive | None = None,
+    ) -> ArchiveTaskRead:
         service = get_archive_task_service(request)
         try:
-            return await service.rearchive_task(task_id)
+            return await service.rearchive_task(
+                task_id, prepare_manually=payload.prepare_manually if payload else False,
+            )
         except ValueError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except RuntimeError as exc:

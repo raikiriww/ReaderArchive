@@ -920,7 +920,9 @@ class ArchiveTaskRepository:
     def mark_read(self, task_id: str) -> None:
         self._update_task(task_id, is_read=True)
 
-    def requeue_for_rearchive(self, task_id: str) -> bool:
+    def requeue_for_rearchive(
+        self, task_id: str, manual_actions: list[ManualActionRead] | None = None,
+    ) -> bool:
         with self._session() as session:
             task = session.get(ArchiveTask, task_id)
             if task is None:
@@ -945,7 +947,10 @@ class ArchiveTaskRepository:
             task.started_at = None
             task.finished_at = None
             task.current_step = "queued"
-            task.manual_actions = []
+            task.manual_actions = [
+                action.model_dump(mode="json", exclude={"browser_tab_state"})
+                for action in (manual_actions or [])
+            ]
             task.updated_at = utc_now()
             session.add(task)
             session.commit()
