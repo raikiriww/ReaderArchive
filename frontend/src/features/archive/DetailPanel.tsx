@@ -22,7 +22,7 @@ interface DetailPanelProps {
   onRefreshFiles: () => void;
   onUploadFile: (file: globalThis.File) => void;
   onDeleteTask: (taskId: string) => void;
-  onResumeManualAction: (taskId: string, code: string) => void;
+  onResumeManualAction: (taskId: string, code: string) => Promise<void>;
   onOpenBrowser: (taskId: string, actionCode: string) => void;
   onMarkRead: (taskId: string) => void;
   onRearchiveTask: (taskId: string) => void;
@@ -57,6 +57,15 @@ export function DetailPanel({
   const [fileValue, setFileValue] = useState("");
   const [renamingFile, setRenamingFile] = useState<string | null>(null);
   const [tagInput, setTagInput] = useState("");
+  const [resuming, setResuming] = useState<string | null>(null);
+  const resumeLock = useRef(false);
+  async function resume(taskId: string, code: string): Promise<void> {
+    if (resumeLock.current) return;
+    resumeLock.current = true;
+    setResuming(taskId);
+    try { await onResumeManualAction(taskId, code); }
+    finally { resumeLock.current = false; setResuming(null); }
+  }
 
   const notices = useMemo(() => (task ? taskNotices(task) : []), [task]);
 
@@ -195,7 +204,7 @@ export function DetailPanel({
               <div className="manual-action-row" key={action.code}>
                 <div className="manual-action-copy">
                   <div className="manual-action-heading">
-                    <strong>{action.target === "video" ? "视频操作" : "网页操作"}</strong>
+                    <strong>{action.code === "page.prepare_manually" ? "等待手动处理" : action.target === "video" ? "视频操作" : "网页操作"}</strong>
                     <span className={`manual-tab-state ${tabState}`}>{tabStateLabel}</span>
                   </div>
                   <p>
@@ -215,11 +224,11 @@ export function DetailPanel({
                   <button
                     className="primary-action"
                     type="button"
-                    disabled={tabState !== "available"}
-                    onClick={() => onResumeManualAction(task.task_id, action.code)}
+                    disabled={tabState !== "available" || resuming !== null}
+                    onClick={() => void resume(task.task_id, action.code)}
                   >
                     {action.resume === "continue_video" ? <LoaderCircle size={16} /> : <Play size={16} />}
-                    {action.resume === "continue_video" ? "登录后继续下载" : "继续处理"}
+                    {resuming === task.task_id ? "正在提交…" : action.code === "page.prepare_manually" ? "处理完成，保存当前页面" : action.resume === "continue_video" ? "登录后继续下载" : "继续处理"}
                   </button>
                 </div>
               </div>
@@ -262,7 +271,7 @@ export function DetailPanel({
           onClick={() => onDeleteTask(task.task_id)}
         >
           <Trash2 size={16} />
-          删除
+          {task.status === "manual_action_required" ? "取消等待" : "删除"}
         </button>
       </div>
 

@@ -41,7 +41,10 @@ def create_router() -> APIRouter:
         request: Request,
     ) -> ArchiveTaskCreated:
         service = get_archive_task_service(request)
-        task = await service.create_task(str(payload.url))
+        try:
+            task = await service.create_task(str(payload.url), prepare_manually=payload.prepare_manually)
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
         return ArchiveTaskCreated(
             task_id=task.task_id,
             status=task.status,

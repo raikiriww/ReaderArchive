@@ -2174,6 +2174,11 @@
       },
       "ArchiveTaskCreate": {
         "properties": {
+          "prepare_manually": {
+            "type": "boolean",
+            "title": "Prepare Manually",
+            "default": false
+          },
           "url": {
             "type": "string",
             "maxLength": 2083,
@@ -2902,7 +2907,8 @@
         "type": "string",
         "enum": [
           "retry_page",
-          "continue_video"
+          "continue_video",
+          "continue_archive"
         ],
         "title": "ManualActionResume"
       },

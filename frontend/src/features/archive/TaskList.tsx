@@ -250,7 +250,7 @@ function TaskRow({ task, selected, onSelect }: { task: ArchiveTask; selected: bo
             ))}
           </span>
         ) : null}
-        {notice ? <span className="error-line">{String(notice).split(/\r?\n/)[0]}</span> : null}
+        {notice ? <span className={task.status === "manual_action_required" && !task.result?.page_error ? "waiting-line" : "error-line"}>{String(notice).split(/\r?\n/)[0]}</span> : null}
         <span className="task-item-meta">
           <span>{sourceLabel(task)}</span>
           <span>{safeUrl(task.url)?.hostname || "—"}</span>
@@ -323,6 +323,7 @@ function archiveMethodState(task: ArchiveTask, method: "page" | "video"): string
   }
   if (task.result?.video_file_name) return "succeeded";
   if (task.result?.video_error) return "failed";
+  if (task.manual_actions.some((action) => action.resume === "continue_archive")) return "running";
   if (waitsForManualAction || ["queued", "running"].includes(task.status)) return "running";
   return "failed";
 }
@@ -337,6 +338,7 @@ function archiveMethodLabel(task: ArchiveTask, method: "page" | "video"): string
   }
   if (task.result?.video_file_name) return "视频已下载";
   if (task.result?.video_error) return "视频下载失败";
+  if (task.manual_actions.some((action) => action.resume === "continue_archive")) return "视频尚未开始，等待手动处理";
   if (waitsForManualAction) return "视频等待手动处理";
   if (["queued", "running"].includes(task.status)) return "正在尝试下载视频";
   return "视频下载失败";

@@ -28,6 +28,21 @@ It packages a web app, an API service, PostgreSQL, SingleFile, yt-dlp, and a bro
 - Open a protected browser desktop for sites that need manual login.
 - Keep archive files and browser data in local folders for backup.
 
+## Preparing a page before saving
+
+Check **保存前手动处理** beside the URL field to open a page and wait before
+saving. Open the task's **切回处理页面** button to use the built-in browser,
+close popups, expand quotations, or load the content you need. Then click
+**处理完成，保存当前页面**. Reader captures that same tab without reloading
+it. The checkbox applies to one submission and resets afterward.
+
+Waiting does not use the archive timeout or block other queued saves. Closing
+Reader's UI does not discard the waiting task. If its browser tab is lost,
+explicitly reopen it and repeat your changes before continuing. A failed page
+capture keeps the prepared tab available for another attempt. **取消等待**
+closes the task's tab and, after confirmation, deletes the task and its files.
+Normal automatic saves and RSS imports keep their existing behavior.
+
 ## Finding saved content
 
 The address field at the top still saves a page directly. Choose **搜索存档**
@@ -255,6 +270,18 @@ docker compose up -d
 ```
 
 Database migrations run automatically when the API starts.
+
+Page loading now defaults to 120 seconds, while the complete page archive job
+allows 240 seconds so capture can finish after loading. The application supplies
+these defaults itself. Existing `.env` or Compose values still override them;
+older Compose files supply the former 20-second load limit and 120-second job
+limit. To adopt the new limits with an older Compose file, set these in `.env`
+before running `docker compose up -d` (no Compose replacement is needed):
+
+```bash
+READER_BROWSER_LOAD_MAX_TIME_MS=120000
+READER_ARCHIVE_TIMEOUT_SECONDS=240
+```
 
 ## Security Notes
 

@@ -24,6 +24,7 @@ docker compose exec -T -u abc archive-desktop \
   --browser-wait-until=networkIdle \
   --browser-wait-until-delay=0 \
   --browser-wait-until-fallback=false \
+  --browser-load-max-time="${READER_BROWSER_LOAD_MAX_TIME_MS:-120000}" \
   --load-deferred-images=true \
   --load-deferred-images-dispatch-scroll-event=true \
   --load-deferred-images-max-idle-time=5000 \

@@ -264,11 +264,11 @@ export function MainApp(): JSX.Element {
     window.requestAnimationFrame(() => settingsButtonRef.current?.focus());
   }, []);
 
-  async function submitArchive(url: string): Promise<void> {
+  async function submitArchive(url: string, prepareManually = false): Promise<void> {
     try {
-      const result = await createArchiveTask(url);
+      const result = await createArchiveTask(url, prepareManually);
       if (!searchOpen) setSelectedTaskId(result.task_id);
-      showToast("已开始保存网页");
+      showToast(prepareManually ? "正在打开网页，等待你处理后保存" : "已开始保存网页");
       await invalidateArchiveData();
     } catch (error) {
       showToast(error instanceof Error ? error.message : "保存失败");
@@ -332,10 +332,11 @@ export function MainApp(): JSX.Element {
   }
 
   async function deleteTask(taskId: string): Promise<void> {
+    const waiting = selectedTask?.task_id === taskId && selectedTask.status === "manual_action_required";
     const confirmed = await askConfirm({
-      title: "删除存档记录",
-      message: "这条记录和相关文件都会被删除。",
-      confirmLabel: "删除",
+      title: waiting ? "取消等待并删除任务" : "删除存档记录",
+      message: waiting ? "将关闭这个任务的处理页面，并删除任务和已有文件。" : "这条记录和相关文件都会被删除。",
+      confirmLabel: waiting ? "取消并删除" : "删除",
       tone: "danger",
     });
     if (!confirmed) return;
@@ -628,7 +629,7 @@ export function MainApp(): JSX.Element {
             onRefreshFiles={() => void refreshFiles(true)}
             onUploadFile={(file) => void uploadFile(file)}
             onDeleteTask={(taskId) => void deleteTask(taskId)}
-            onResumeManualAction={(taskId, code) => void resumeManualAction(taskId, code)}
+            onResumeManualAction={resumeManualAction}
             onOpenBrowser={(taskId, actionCode) => void openTaskInBrowser(taskId, actionCode)}
             onMarkRead={(taskId) => void markRead(taskId)}
             onRearchiveTask={(taskId) => void rearchiveTask(taskId)}
