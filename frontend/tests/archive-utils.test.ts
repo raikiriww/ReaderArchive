@@ -1,5 +1,14 @@
 import { describe, expect, test } from "bun:test";
-import { formatFileSize, shortError, sourceLabel, taskNotices, taskTitle } from "../src/utils/format";
+import {
+  cleanSummary,
+  formatFileSize,
+  hostSourceLabel,
+  isVideoNoise,
+  rowHasWarning,
+  shortError,
+  sourceLabelFor,
+  taskTitle,
+} from "../src/utils/format";
 import { cleanTag, validTagFilters } from "../src/utils/tags";
 import { archiveTask } from "./fixtures";
 
@@ -22,78 +31,54 @@ describe("archive formatting helpers", () => {
     expect(shortError("")).toBe("存档失败");
   });
 
-  test("builds source labels and task notices", () => {
-    expect(sourceLabel(archiveTask())).toBe("手动");
-    expect(sourceLabel(archiveTask({ source_type: "rss", source_title: "Daily Feed" }))).toBe("RSS：Daily Feed");
-
-    const notices = taskNotices(
-      archiveTask({
-        status: "manual_action_required",
-        manual_actions: [
-          {
-            code: "video_browser_login",
-            kind: "login",
-            target: "video",
-            message: "请完成登录",
-            resume: "continue_video",
-            rule_id: "video.browser_login",
-          },
-        ],
-        error: "task failed",
-        result: {
-          file_name: "reader.html",
-          download_url: "/download",
-          view_url: "/view",
-          video_file_name: null,
-          video_download_url: null,
-          video_error: "video failed",
-          page_error: null,
-        },
-      }),
-    ).map((notice) => notice.text);
-
-    expect(notices).toContain("task failed");
-    expect(notices).toContain("网页已保存，视频未保存：video failed");
-    expect(notices).toContain("请完成登录");
-  });
-
-  test("does not claim the page was saved when a manual page action is pending", () => {
-    const notices = taskNotices(
-      archiveTask({
-        status: "manual_action_required",
-        manual_actions: [
-          {
-            code: "wechat_article_verification",
-            kind: "verification",
-            target: "page",
-            message: "请完成微信验证",
-            resume: "retry_page",
-            rule_id: "wechat.mp_article.verification",
-          },
-        ],
-        result: {
-          file_name: null,
-          download_url: null,
-          view_url: null,
-          video_file_name: null,
-          video_download_url: null,
-          video_error: "unsupported",
-          page_error: null,
-        },
-      }),
-    ).map((notice) => notice.text);
-
-    expect(notices).toContain("视频未保存：unsupported");
-    expect(notices).not.toContain("网页已保存，视频未保存：unsupported");
+  test("builds source labels", () => {
+    expect(sourceLabelFor(archiveTask())).toBe("手动");
+    expect(sourceLabelFor(archiveTask({ url: "https://weibo.com/1/abc" }))).toBe("手动");
+    expect(sourceLabelFor(archiveTask({ source_type: "rss", source_title: "Daily Feed" }))).toBe("Daily Feed");
+    expect(sourceLabelFor(archiveTask({ source_type: "rss", source_title: null }))).toBe("RSS");
   });
 });
 
-test("failed prepared capture does not claim a video was saved", () => {
-  const task = archiveTask({result: {file_name: null, download_url: null, view_url: null,
-    video_file_name: null, video_download_url: null, video_error: "no video", page_error: "capture failed"}});
-  const notices = taskNotices(task).map((notice) => notice.text);
-  expect(notices).toContain("网页未保存：capture failed");
-  expect(notices.some((text) => text.includes("视频已保存"))).toBe(false);
+describe("list row helpers", () => {
+  test("labels urls by known platform or bare hostname", () => {
+    expect(hostSourceLabel("https://m.weibo.cn/status/1")).toBe("微博");
+    expect(hostSourceLabel("https://weibo.cn/x")).toBe("微博");
+    expect(hostSourceLabel("https://mp.weixin.qq.com/s/x")).toBe("公众号");
+    expect(hostSourceLabel("https://twitter.com/a")).toBe("X");
+    expect(hostSourceLabel("https://www.example.org/a")).toBe("example.org");
+    expect(hostSourceLabel("nope")).toBe("");
+  });
+
+  test("cleans summaries of whitespace and platform boilerplate", () => {
+    expect(cleanSummary("公开 26-10-10 13:55 发布于 北京 来自 微博网页版 已编辑 今天天气\n不错")).toBe("今天天气 不错");
+    expect(cleanSummary("Daily Hacker News for 2026-10-10   Top story")).toBe("Top story");
+    expect(cleanSummary("  plain   text ")).toBe("plain text");
+    expect(cleanSummary(null)).toBe("");
+  });
+
+  test("only a failed page flags the row; video errors never do", () => {
+    const result = archiveTask().result;
+    expect(rowHasWarning(archiveTask({ result: { ...result, video_error: "HTTP Error 403" } }))).toBe(false);
+    expect(rowHasWarning(archiveTask({ result: { ...result, video_error: "[Weibo] 1: No video formats found!" } }))).toBe(
+      false,
+    );
+    expect(rowHasWarning(archiveTask({ result: { ...result, page_error: "crash" } }))).toBe(true);
+    expect(rowHasWarning(archiveTask({ result: null }))).toBe(false);
+  });
+
+  test("recognizes yt-dlp no-video noise", () => {
+    expect(isVideoNoise("ERROR: [Weibo] 5: No video formats found!; please report this issue on https://x")).toBe(true);
+    expect(isVideoNoise("ERROR: Failed to parse JSON (caused by JSONDecodeError)")).toBe(true);
+    expect(isVideoNoise("Unsupported URL: https://example.com")).toBe(true);
+    expect(isVideoNoise("HTTP Error 403: Forbidden")).toBe(false);
+  });
+
+  test("short errors drop the yt-dlp ERROR prefix and report-issue boilerplate", () => {
+    expect(shortError("ERROR: [generic] boom; please report this issue on https://github.com/yt-dlp/yt-dlp/issues")).toBe(
+      "[generic] boom",
+    );
+    expect(shortError("x".repeat(400)).length).toBe(163);
+  });
 });
 
 describe("tag helpers", () => {

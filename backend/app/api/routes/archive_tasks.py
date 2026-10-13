@@ -62,10 +62,13 @@ def create_router() -> APIRouter:
         tags: list[str] | None = Query(default=None, max_length=80),
         q: str | None = Query(default=None, max_length=240),
         title: str | None = Query(default=None, max_length=120),
-        status_filter: Literal["running", "failed"] | None = Query(
+        status_filter: Literal["running", "failed", "attention", "problem", "succeeded"]
+        | None = Query(
             default=None,
             alias="status",
         ),
+        source: Literal["manual", "rss"] | None = Query(default=None),
+        tags_match: Literal["any", "all"] = Query(default="any"),
     ) -> ArchiveTaskListRead:
         service = get_archive_task_service(request)
         return await asyncio.to_thread(
@@ -78,6 +81,8 @@ def create_router() -> APIRouter:
             query=q,
             title_query=title,
             status_filter=status_filter,
+            source=source,
+            tags_match=tags_match,
         )
 
     @router.get("/archive-search", response_model=ArchiveSearchRead)
@@ -142,10 +147,19 @@ def create_router() -> APIRouter:
             custom_title_provided="custom_title" in payload.model_fields_set,
             custom_title=payload.custom_title,
             tags=payload.tags,
+            is_read=payload.is_read,
         )
         if task is None:
             raise HTTPException(status_code=404, detail="Archive task not found.")
         return task
+
+    @router.get("/archive-tasks/{task_id}/versions", response_model=list[ArchiveTaskRead])
+    async def list_archive_task_versions(task_id: str, request: Request) -> list[ArchiveTaskRead]:
+        service = get_archive_task_service(request)
+        versions = await asyncio.to_thread(service.list_task_versions, task_id)
+        if versions is None:
+            raise HTTPException(status_code=404, detail="Archive task not found.")
+        return versions
 
     @router.get("/archive-tasks/{task_id}/file-list", response_model=list[ArchiveTaskFileRead])
     async def list_archive_task_files(

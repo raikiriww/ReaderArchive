@@ -62,6 +62,9 @@ import type {
   ArchiveTasksUpdateArchiveTaskData,
   ArchiveTasksUpdateArchiveTaskResponses,
   ArchiveTasksUpdateArchiveTaskErrors,
+  ArchiveTasksListArchiveTaskVersionsData,
+  ArchiveTasksListArchiveTaskVersionsResponses,
+  ArchiveTasksListArchiveTaskVersionsErrors,
   ArchiveTasksListArchiveTaskFilesData,
   ArchiveTasksListArchiveTaskFilesResponses,
   ArchiveTasksListArchiveTaskFilesErrors,
@@ -615,6 +618,30 @@ export const archiveTasksUpdateArchiveTask = <
 };
 
 /**
+ * List Archive Task Versions
+ */
+export const archiveTasksListArchiveTaskVersions = <
+  ThrowOnError extends boolean = false,
+>(
+  options: Options<ArchiveTasksListArchiveTaskVersionsData, ThrowOnError>,
+) => {
+  return (options.client ?? _heyApiClient).get<
+    ArchiveTasksListArchiveTaskVersionsResponses,
+    ArchiveTasksListArchiveTaskVersionsErrors,
+    ThrowOnError
+  >({
+    security: [
+      {
+        scheme: "bearer",
+        type: "http",
+      },
+    ],
+    url: "/api/v1/archive-tasks/{task_id}/versions",
+    ...options,
+  });
+};
+
+/**
  * List Archive Task Files
  */
 export const archiveTasksListArchiveTaskFiles = <
@@ -757,7 +784,10 @@ export const archiveTasksRearchiveTask = <ThrowOnError extends boolean = false>(
     ],
     url: "/api/v1/archive-tasks/{task_id}/rearchive",
     ...options,
-    headers: { "Content-Type": "application/json", ...options?.headers },
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
   });
 };
 

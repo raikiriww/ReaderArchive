@@ -432,6 +432,8 @@ class ArchiveTaskRepository:
         title_query: str | None = None,
         statuses: list[str] | None = None,
         semantic_matches: dict[str, SemanticSearchMatch] | None = None,
+        source: str | None = None,
+        tags_match: str = "any",
     ) -> tuple[list[ArchiveTaskRead], int]:
         status_values = [str(status) for status in (statuses or [])]
         tag_names = [tag.casefold() for tag in (tags or [])]
@@ -443,6 +445,8 @@ class ArchiveTaskRepository:
                 statement = statement.where(ArchiveTask.is_read == False)  # noqa: E712
             if status_values:
                 statement = statement.where(col(ArchiveTask.status).in_(status_values))
+            if source:
+                statement = statement.where(ArchiveTask.source_type == source)
             tasks = session.exec(statement).all()
             selected: list[tuple[ArchiveTaskRead, float]] = []
             for task in tasks:
@@ -453,7 +457,8 @@ class ArchiveTaskRepository:
                     continue
                 if tag_names:
                     task_tags = {tag.casefold() for tag in response.tags}
-                    if not any(tag in task_tags for tag in tag_names):
+                    matcher = all if tags_match == "all" else any
+                    if not matcher(tag in task_tags for tag in tag_names):
                         continue
                 if semantic_match is not None:
                     response = response.model_copy(
@@ -507,6 +512,26 @@ class ArchiveTaskRepository:
     def get_search_document(self, task_id: str) -> ArchiveSearchDocument | None:
         with self._session() as session:
             return session.get(ArchiveSearchDocument, task_id)
+
+    def get_search_document_summaries(
+        self, task_ids: list[str], max_chars: int = 200
+    ) -> dict[str, str]:
+        """Whitespace-collapsed opening text of each ready search document, in one query."""
+        if not task_ids:
+            return {}
+        # Read a bounded prefix so huge documents are not loaded just for a list excerpt.
+        prefix = func.substr(ArchiveSearchDocument.content, 1, max_chars * 4)
+        with self._session() as session:
+            rows = session.exec(select(ArchiveSearchDocument.task_id, prefix).where(
+                col(ArchiveSearchDocument.task_id).in_(task_ids),
+                ArchiveSearchDocument.status == "ready",
+            )).all()
+        summaries: dict[str, str] = {}
+        for task_id, content in rows:
+            collapsed = " ".join(str(content or "").split())
+            if collapsed:
+                summaries[task_id] = collapsed[:max_chars]
+        return summaries
 
     def list_task_ids_requiring_search_document(self) -> list[str]:
         with self._session() as session:
@@ -919,6 +944,24 @@ class ArchiveTaskRepository:
 
     def mark_read(self, task_id: str) -> None:
         self._update_task(task_id, is_read=True)
+
+    def set_read(self, task_id: str, is_read: bool) -> bool:
+        return self._update_task(task_id, is_read=is_read)
+
+    def list_versions(self, task_id: str) -> list[ArchiveTaskRead] | None:
+        """Return tasks sharing ``task_id``'s normalized URL, newest first (incl. itself)."""
+        with self._session() as session:
+            task = session.get(ArchiveTask, task_id)
+            if task is None:
+                return None
+            if not task.normalized_url:
+                return [self._to_task(session, task)]
+            versions = session.exec(
+                select(ArchiveTask)
+                .where(ArchiveTask.normalized_url == task.normalized_url)
+                .order_by(col(ArchiveTask.created_at).desc(), col(ArchiveTask.id))
+            ).all()
+            return [self._to_task(session, version) for version in versions]
 
     def requeue_for_rearchive(
         self, task_id: str, manual_actions: list[ManualActionRead] | None = None,

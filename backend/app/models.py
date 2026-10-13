@@ -370,6 +370,8 @@ class ArchiveTaskRead(BaseModel):
     search_match: ArchiveTaskSearchMatch | None = None
     result: ArchiveTaskResult | None = None
     error: str | None = None
+    # Opening text of the readable document; only filled by the task list endpoint.
+    summary: str | None = None
 
 
 class ArchiveTaskListRead(BaseModel):
@@ -402,6 +404,7 @@ class ArchiveSearchTextRead(BaseModel):
 class ArchiveTaskUpdate(BaseModel):
     custom_title: str | None = PydanticField(default=None, max_length=200)
     tags: list[str] | None = PydanticField(default=None, max_length=20)
+    is_read: bool | None = None
 
 
 class ArchiveTagRead(BaseModel):

@@ -360,7 +360,7 @@ def search_archive(service: ArchiveTaskService, *, query: str, limit: int, offse
                    include_read: bool, tags: list[str] | None, content_type: str,
                    source: str | None, date_from: datetime | None,
                    exact: bool, sort: str, statuses: list[str] | None = None,
-                   group_duplicates: bool = True) -> ArchiveSearchRead:
+                   group_duplicates: bool = True, tags_match: str = "any") -> ArchiveSearchRead:
     repository = service.repository
     query = " ".join(query.split())
     scope = select(ArchiveTask.id)
@@ -373,9 +373,13 @@ def search_archive(service: ArchiveTaskService, *, query: str, limit: int, offse
     if date_from:
         scope = scope.where(ArchiveTask.created_at >= date_from)
     if tags:
-        tagged = select(ArchiveTaskTag.task_id).join(ArchiveTag, ArchiveTag.id == ArchiveTaskTag.tag_id).where(
-            func.lower(ArchiveTag.name).in_([tag.casefold() for tag in tags]))
-        scope = scope.where(col(ArchiveTask.id).in_(tagged))
+        # tags_match="any" (default) keeps tasks with at least one tag; "all" requires every tag.
+        tag_groups = [[tag.casefold() for tag in tags]] if tags_match != "all" else [
+            [tag.casefold()] for tag in dict.fromkeys(tags)]
+        for names in tag_groups:
+            tagged = select(ArchiveTaskTag.task_id).join(ArchiveTag, ArchiveTag.id == ArchiveTaskTag.tag_id).where(
+                func.lower(ArchiveTag.name).in_(names))
+            scope = scope.where(col(ArchiveTask.id).in_(tagged))
     is_file_archive = or_(*(col(ArchiveTask.output_file).ilike('%' + suffix)
         for suffix in FILE_ARCHIVE_SUFFIXES))
     if content_type == "video":

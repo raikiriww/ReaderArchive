@@ -275,12 +275,19 @@ export type ArchiveTaskRead = {
    * Error
    */
   error?: string | null;
+  /**
+   * Summary
+   */
+  summary?: string | null;
 };
 
 /**
  * ArchiveTaskRearchive
  */
 export type ArchiveTaskRearchive = {
+  /**
+   * Prepare Manually
+   */
   prepare_manually?: boolean;
 };
 
@@ -399,6 +406,10 @@ export type ArchiveTaskUpdate = {
    * Tags
    */
   tags?: Array<string> | null;
+  /**
+   * Is Read
+   */
+  is_read?: boolean | null;
 };
 
 /**
@@ -1175,7 +1186,17 @@ export type ArchiveTasksListArchiveTasksData = {
     /**
      * Status
      */
-    status?: ("running" | "failed") | null;
+    status?:
+      | ("running" | "failed" | "attention" | "problem" | "succeeded")
+      | null;
+    /**
+     * Source
+     */
+    source?: ("manual" | "rss") | null;
+    /**
+     * Tags Match
+     */
+    tags_match?: "any" | "all";
   };
   url: "/api/v1/archive-tasks";
 };
@@ -1441,6 +1462,39 @@ export type ArchiveTasksUpdateArchiveTaskResponses = {
 export type ArchiveTasksUpdateArchiveTaskResponse =
   ArchiveTasksUpdateArchiveTaskResponses[keyof ArchiveTasksUpdateArchiveTaskResponses];
 
+export type ArchiveTasksListArchiveTaskVersionsData = {
+  body?: never;
+  path: {
+    /**
+     * Task Id
+     */
+    task_id: string;
+  };
+  query?: never;
+  url: "/api/v1/archive-tasks/{task_id}/versions";
+};
+
+export type ArchiveTasksListArchiveTaskVersionsErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type ArchiveTasksListArchiveTaskVersionsError =
+  ArchiveTasksListArchiveTaskVersionsErrors[keyof ArchiveTasksListArchiveTaskVersionsErrors];
+
+export type ArchiveTasksListArchiveTaskVersionsResponses = {
+  /**
+   * Response Archive-Tasks-List Archive Task Versions
+   * Successful Response
+   */
+  200: Array<ArchiveTaskRead>;
+};
+
+export type ArchiveTasksListArchiveTaskVersionsResponse =
+  ArchiveTasksListArchiveTaskVersionsResponses[keyof ArchiveTasksListArchiveTaskVersionsResponses];
+
 export type ArchiveTasksListArchiveTaskFilesData = {
   body?: never;
   path: {
@@ -1616,6 +1670,9 @@ export type ArchiveTasksMarkArchiveTaskReadResponse =
   ArchiveTasksMarkArchiveTaskReadResponses[keyof ArchiveTasksMarkArchiveTaskReadResponses];
 
 export type ArchiveTasksRearchiveTaskData = {
+  /**
+   * Payload
+   */
   body?: ArchiveTaskRearchive | null;
   path: {
     /**
