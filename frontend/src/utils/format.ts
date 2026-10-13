@@ -1,12 +1,4 @@
-import type { ArchiveTask, ArchiveTaskStatus } from "../types/domain";
-
-export const statusMeta: Record<ArchiveTaskStatus, { label: string; className: string }> = {
-  queued: { label: "排队中", className: "queued" },
-  running: { label: "处理中", className: "running" },
-  manual_action_required: { label: "需手动处理", className: "manual-action" },
-  succeeded: { label: "已完成", className: "succeeded" },
-  failed: { label: "失败", className: "failed" },
-};
+import type { ArchiveTask } from "../types/domain";
 
 export function formatDate(value: string | null | undefined): string {
   if (!value) return "—";
@@ -56,15 +48,40 @@ export function shortError(value: string | null | undefined): string {
   const cleaned = firstLine
     .replace(/([?&](?:access_token|auth|key|poc_token|sig|signature|token)=)[^&\s]+/gi, "$1[已隐藏]")
     .replace(/\s+/g, " ")
+    .replace(/^ERROR:\s*/i, "")
+    .replace(/;?\s*please report this issue on .*$/i, "")
+    .replace(/;?\s*Confirm you are on the latest version.*$/i, "")
     .trim();
   return cleaned.length > 160 ? `${cleaned.slice(0, 160)}...` : cleaned;
 }
 
-export function sourceLabel(task: ArchiveTask): string {
-  if (task.source_type === "rss") {
-    return task.source_title ? `RSS：${task.source_title}` : "RSS";
-  }
+/** Short source label for a URL: known platforms by name, otherwise the hostname without www. */
+export function hostSourceLabel(value: string): string {
+  const host = safeUrl(value.trim())?.hostname.toLowerCase().replace(/^www\./, "") || "";
+  if (/(^|\.)weibo\.(com|cn)$/.test(host)) return "微博";
+  if (host === "mp.weixin.qq.com") return "公众号";
+  if (host === "x.com" || host === "twitter.com" || host.endsWith(".x.com") || host.endsWith(".twitter.com")) return "X";
+  return host;
+}
+
+/** Source label for a task: feed title for RSS items, 手动 for manual saves. */
+export function sourceLabelFor(task: ArchiveTask): string {
+  if (task.source_type === "rss") return task.source_title || "RSS";
   return "手动";
+}
+
+const WEIBO_PREFIX =
+  /^公开\s*\S*?\s*\d{2,4}-\d{1,2}-\d{1,2}\s*\d{1,2}:\d{2}\s*(?:发布于\s*\S+)?\s*(?:来自\s*(?:微博 weibo\.com|\S+))?\s*(?:已编辑)?\s*/;
+const HN_PREFIX = /^Daily Hacker News for \d{4}-\d{2}-\d{2}\s*/i;
+
+/** Clean a list-row body summary: collapse whitespace and strip platform boilerplate prefixes. */
+export function cleanSummary(summary: string | null | undefined): string {
+  return String(summary || "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(WEIBO_PREFIX, "")
+    .replace(HN_PREFIX, "")
+    .trim();
 }
 
 export function stepLabel(value: string | null): string {
@@ -83,21 +100,28 @@ export function fileSourceLabel(tool: string, sourceType: string): string {
   return "文件";
 }
 
-export function taskNotices(task: ArchiveTask): Array<{ type: "error" | "warning"; text: string }> {
-  const notices: Array<{ type: "error" | "warning"; text: string }> = [];
-  if (task.error) notices.push({ type: "error", text: shortError(task.error) });
-  if (task.result?.page_error) {
-    const prefix = task.result.video_file_name ? "视频已保存，网页未保存" : "网页未保存";
-    notices.push({ type: "warning", text: `${prefix}：${shortError(task.result.page_error)}` });
-  }
-  if (task.result?.video_error) {
-    const prefix = task.result.file_name ? "网页已保存，视频未保存" : "视频未保存";
-    notices.push({ type: "warning", text: `${prefix}：${shortError(task.result.video_error)}` });
-  }
-  task.manual_actions.forEach((action) => {
-    notices.push({ type: "warning", text: action.message });
-  });
-  return notices;
+/** yt-dlp errors that only mean "this page has no video"; shown as a quiet line, not a warning. */
+const VIDEO_NOISE = [
+  /unsupported url/i,
+  /no video/i,
+  /no media/i,
+  /not a video/i,
+  /no suitable (?:extractor|formats?)/i,
+  /does not contain (?:a |any )?video/i,
+  /no video formats found/i,
+  /failed to parse json/i,
+  /不支持(?:该|这个)?网址/,
+  /没有(?:找到)?视频/,
+];
+
+export function isVideoNoise(error: string | null | undefined): boolean {
+  if (!error) return false;
+  return VIDEO_NOISE.some((pattern) => pattern.test(error));
+}
+
+/** Whether a list row should flag a problem: only a page that failed to save counts (video errors are noise). */
+export function rowHasWarning(task: ArchiveTask): boolean {
+  return Boolean(task.result?.page_error);
 }
 
 export function taskFileKey(task: ArchiveTask): string {

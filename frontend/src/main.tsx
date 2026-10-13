@@ -3,12 +3,14 @@ import { createRoot } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { RouterProvider, createRouter } from "@tanstack/react-router";
 import { routeTree } from "./routeTree.gen";
-import { Toaster } from "sonner";
+import { ToastProvider } from "./app/toast";
+import { ConfirmProvider } from "./features/dialogs/ConfirmDialog";
 import "./styles/tailwind.css";
-import "./styles/base.css";
-import "./styles/layout.css";
-import "./styles/components.css";
-import "./styles/search.css";
+import "./styles/tokens.css";
+import "./styles/dialogs.css";
+import "./styles/shell.css";
+import "./styles/list.css";
+import "./styles/reader.css";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -35,8 +37,11 @@ declare module "@tanstack/react-router" {
 createRoot(document.getElementById("root") as HTMLElement).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
-      <RouterProvider router={router} />
-      <Toaster position="bottom-right" richColors closeButton />
+      <ConfirmProvider>
+        <ToastProvider>
+          <RouterProvider router={router} />
+        </ToastProvider>
+      </ConfirmProvider>
     </QueryClientProvider>
   </StrictMode>,
 );

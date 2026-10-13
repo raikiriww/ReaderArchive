@@ -1,26 +1,40 @@
-import { type FormEvent, type KeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
-import { Shield, SlidersHorizontal, Users, X } from "lucide-react";
+import { type FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { RefreshCw, Shield, SlidersHorizontal, Users, X } from "lucide-react";
 import type { AppConfig, User } from "../../types/domain";
+import { DialogOverlay } from "../dialogs/ConfirmDialog";
 
-type SettingsSection = "system" | "users" | "account";
+export type SettingsSection = "system" | "users" | "account";
 
 interface SettingsDialogProps {
   open: boolean;
+  /** Section to show when the dialog opens; non-admins always land on account. */
+  initialSection?: SettingsSection;
   config: AppConfig;
   currentUser: User | null;
   users: User[];
   onClose: () => void;
   onLoadUsers: () => void;
-  onUpdateConfig: (payload: { poll_interval_ms: number; rss_refresh_interval_seconds: number }) => Promise<void>;
-  onCreateUser: (payload: { username: string; password: string; role: string }) => Promise<void>;
+  onUpdateConfig: (payload: {
+    poll_interval_ms: number;
+    rss_refresh_interval_seconds: number;
+  }) => Promise<void>;
+  onCreateUser: (payload: {
+    username: string;
+    password: string;
+    role: string;
+  }) => Promise<void>;
   onToggleUser: (userId: string, enabled: boolean) => void;
   onResetUserPassword: (userId: string) => void;
   onDeleteUser: (userId: string, username: string) => void;
-  onChangePassword: (payload: { current_password: string; new_password: string }) => Promise<void>;
+  onChangePassword: (payload: {
+    current_password: string;
+    new_password: string;
+  }) => Promise<void>;
 }
 
 export function SettingsDialog({
   open,
+  initialSection,
   config,
   currentUser,
   users,
@@ -35,13 +49,23 @@ export function SettingsDialog({
 }: SettingsDialogProps): JSX.Element | null {
   const closeButtonRef = useRef<HTMLButtonElement | null>(null);
   const isAdmin = currentUser?.role === "admin";
-  const [activeSection, setActiveSection] = useState<SettingsSection>("system");
+  const [activeSection, setActiveSection] = useState<SettingsSection>(
+    isAdmin ? (initialSection ?? "system") : "account",
+  );
   const [systemDraft, setSystemDraft] = useState({
     pollSeconds: secondsFromMs(config.poll_interval_ms),
     rssMinutes: minutesFromSeconds(config.rss_refresh_interval_seconds),
   });
-  const [newUser, setNewUser] = useState({ username: "", password: "", role: "user" });
-  const [passwords, setPasswords] = useState({ current_password: "", new_password: "" });
+  const [newUser, setNewUser] = useState({
+    username: "",
+    password: "",
+    role: "user",
+  });
+  const [passwords, setPasswords] = useState({
+    current_password: "",
+    new_password: "",
+  });
+  const [passwordError, setPasswordError] = useState("");
   const [savingSystem, setSavingSystem] = useState(false);
   const [creating, setCreating] = useState(false);
   const [changing, setChanging] = useState(false);
@@ -50,7 +74,11 @@ export function SettingsDialog({
     () => [
       ...(isAdmin
         ? [
-            { id: "system" as const, label: "系统设置", icon: SlidersHorizontal },
+            {
+              id: "system" as const,
+              label: "系统设置",
+              icon: SlidersHorizontal,
+            },
             { id: "users" as const, label: "用户管理", icon: Users },
           ]
         : []),
@@ -63,10 +91,10 @@ export function SettingsDialog({
     if (!open) return;
     closeButtonRef.current?.focus();
     setActiveSection((section) => {
-      if (isAdmin) return section;
-      return "account";
+      if (!isAdmin) return "account";
+      return initialSection ?? section;
     });
-  }, [isAdmin, open]);
+  }, [initialSection, isAdmin, open]);
 
   useEffect(() => {
     if (!open) return;
@@ -77,10 +105,6 @@ export function SettingsDialog({
   }, [config.poll_interval_ms, config.rss_refresh_interval_seconds, open]);
 
   if (!open) return null;
-
-  function keyDown(event: KeyboardEvent<HTMLElement>): void {
-    if (event.key === "Escape") onClose();
-  }
 
   function selectSection(section: SettingsSection): void {
     setActiveSection(section);
@@ -102,17 +126,29 @@ export function SettingsDialog({
 
   async function createUser(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
+    if (!newUser.username.trim() || newUser.password.length < 8) return;
     setCreating(true);
     try {
-      await onCreateUser(newUser);
+      await onCreateUser({ ...newUser, username: newUser.username.trim() });
       setNewUser({ username: "", password: "", role: "user" });
     } finally {
       setCreating(false);
     }
   }
 
-  async function changePassword(event: FormEvent<HTMLFormElement>): Promise<void> {
+  async function changePassword(
+    event: FormEvent<HTMLFormElement>,
+  ): Promise<void> {
     event.preventDefault();
+    if (!passwords.current_password) {
+      setPasswordError("请输入当前密码");
+      return;
+    }
+    if (passwords.new_password.length < 8) {
+      setPasswordError("新密码至少 8 位");
+      return;
+    }
+    setPasswordError("");
     setChanging(true);
     try {
       await onChangePassword(passwords);
@@ -122,72 +158,92 @@ export function SettingsDialog({
     }
   }
 
+  const semantic = config.semantic_search ?? null;
+  const semanticStatus = semantic?.status ?? "unknown";
+
   return (
-    <div className="modal-backdrop settings-backdrop" role="presentation">
-      <section className="settings-dialog" role="dialog" aria-modal="true" aria-labelledby="settingsTitle" onKeyDown={keyDown}>
-        <header className="settings-top">
-          <div>
-            <h2 id="settingsTitle">设置</h2>
-            <p>{activeLabel(activeSection)}</p>
-          </div>
-          <button ref={closeButtonRef} className="icon-button" type="button" aria-label="关闭" onClick={onClose}>
-            <X size={18} />
+    <DialogOverlay onClose={onClose} labelledBy="settingsTitle">
+      <section className="dlg-dialog dlg-settings">
+        <header className="dlg-head">
+          <h2 id="settingsTitle">设置</h2>
+          <button
+            ref={closeButtonRef}
+            className="dlg-icon-btn"
+            type="button"
+            aria-label="关闭"
+            onClick={onClose}
+          >
+            <X size={16} />
           </button>
         </header>
 
-        <div className="settings-layout">
-          <nav className="settings-nav" aria-label="设置分类">
+        <div className="dlg-settings-body">
+          <nav className="dlg-settings-nav" aria-label="设置分类">
             {sections.map((section) => {
               const Icon = section.icon;
               return (
                 <button
                   key={section.id}
-                  className={activeSection === section.id ? "active" : ""}
+                  className={activeSection === section.id ? "dlg-on" : ""}
+                  aria-current={
+                    activeSection === section.id ? "page" : undefined
+                  }
                   type="button"
                   onClick={() => selectSection(section.id)}
                 >
-                  <Icon size={17} />
+                  <Icon size={15} aria-hidden="true" />
                   {section.label}
                 </button>
               );
             })}
           </nav>
 
-          <div className="settings-content">
-            {activeSection === "system" ? (
-              <section className="settings-panel" aria-labelledby="systemSettingsTitle">
-                <div className="settings-panel-title">
-                  <h3 id="systemSettingsTitle">系统设置</h3>
-                </div>
-                <div className="semantic-status">
-                  <div>
-                    <span>语义检索</span>
-                    <strong>{semanticStatusLabel(config.semantic_search?.status)}</strong>
+          <div className="dlg-settings-content">
+            {activeSection === "system" && isAdmin ? (
+              <section
+                className="dlg-settings-panel"
+                aria-labelledby="systemSettingsTitle"
+              >
+                <h3 id="systemSettingsTitle" className="dlg-section-title">
+                  系统设置
+                </h3>
+                <div
+                  className={`dlg-sem-card dlg-sem-${semanticTone(semanticStatus)}`}
+                >
+                  <div className="dlg-sem-top">
+                    <span>语义检索（按大意搜索）</span>
+                    <strong>
+                      <span className="dlg-dot" aria-hidden="true" />
+                      {semanticStatusLabel(semantic?.status)}
+                    </strong>
                   </div>
                   <dl>
                     <div>
                       <dt>模型</dt>
-                      <dd>{config.semantic_search?.model_name ?? "未启用"}</dd>
+                      <dd>{semantic?.model_name ?? "未启用"}</dd>
                     </div>
                     <div>
                       <dt>维度</dt>
-                      <dd>{config.semantic_search?.embedding_dimensions ?? "-"}</dd>
+                      <dd>{semantic?.embedding_dimensions ?? "-"}</dd>
                     </div>
                     <div>
                       <dt>已处理</dt>
-                      <dd>{config.semantic_search?.indexed_count ?? 0}</dd>
+                      <dd>{semantic?.indexed_count ?? 0}</dd>
                     </div>
                     <div>
                       <dt>失败</dt>
-                      <dd>{config.semantic_search?.failed_count ?? 0}</dd>
+                      <dd>{semantic?.failed_count ?? 0}</dd>
                     </div>
                   </dl>
-                  {config.semantic_search?.last_error ? (
-                    <p className="semantic-error">{config.semantic_search.last_error}</p>
+                  {semantic?.last_error ? (
+                    <p className="dlg-error">{semantic.last_error}</p>
                   ) : null}
+                  <p className="dlg-sem-note">
+                    关键词搜索始终可用。模型启动中或忙碌时，会暂时只按关键词查找。
+                  </p>
                 </div>
-                <form className="settings-form settings-form-card" onSubmit={saveSystem}>
-                  <label htmlFor="pollIntervalSeconds">
+                <form className="dlg-settings-form" onSubmit={saveSystem}>
+                  <label className="dlg-field" htmlFor="pollIntervalSeconds">
                     刷新间隔（秒）
                     <input
                       id="pollIntervalSeconds"
@@ -199,11 +255,15 @@ export function SettingsDialog({
                       type="number"
                       value={systemDraft.pollSeconds}
                       onChange={(event) =>
-                        setSystemDraft((value) => ({ ...value, pollSeconds: numberValue(event.target.value) }))
+                        setSystemDraft((value) => ({
+                          ...value,
+                          pollSeconds: numberValue(event.target.value),
+                        }))
                       }
                     />
+                    <small>列表多久向服务器更新一次任务状态</small>
                   </label>
-                  <label htmlFor="rssIntervalMinutes">
+                  <label className="dlg-field" htmlFor="rssIntervalMinutes">
                     RSS 检查间隔（分钟）
                     <input
                       id="rssIntervalMinutes"
@@ -215,13 +275,21 @@ export function SettingsDialog({
                       type="number"
                       value={systemDraft.rssMinutes}
                       onChange={(event) =>
-                        setSystemDraft((value) => ({ ...value, rssMinutes: numberValue(event.target.value) }))
+                        setSystemDraft((value) => ({
+                          ...value,
+                          rssMinutes: numberValue(event.target.value),
+                        }))
                       }
                     />
+                    <small>多久检查一次订阅源是否有新文章</small>
                   </label>
-                  <div className="settings-actions">
-                    <button disabled={savingSystem} type="submit">
-                      {savingSystem ? "保存中" : "保存设置"}
+                  <div>
+                    <button
+                      className="dlg-btn dlg-btn-primary"
+                      disabled={savingSystem}
+                      type="submit"
+                    >
+                      {savingSystem ? "保存中…" : "保存设置"}
                     </button>
                   </div>
                 </form>
@@ -229,15 +297,29 @@ export function SettingsDialog({
             ) : null}
 
             {activeSection === "users" && isAdmin ? (
-              <section className="settings-panel" aria-labelledby="userSettingsTitle">
-                <div className="settings-panel-title">
-                  <h3 id="userSettingsTitle">用户管理</h3>
-                  <button className="text-button" type="button" onClick={onLoadUsers}>
+              <section
+                className="dlg-settings-panel"
+                aria-labelledby="userSettingsTitle"
+              >
+                <div className="dlg-section-head">
+                  <h3 id="userSettingsTitle" className="dlg-section-title">
+                    用户管理
+                  </h3>
+                  <button
+                    className="dlg-text-btn"
+                    type="button"
+                    onClick={onLoadUsers}
+                  >
+                    <RefreshCw size={12} aria-hidden="true" />
                     刷新
                   </button>
                 </div>
-                <form className="settings-form user-create-form" onSubmit={createUser}>
-                  <label htmlFor="newUserUsername">
+                <form
+                  className="dlg-user-create"
+                  autoComplete="off"
+                  onSubmit={createUser}
+                >
+                  <label className="dlg-field" htmlFor="newUserUsername">
                     用户名
                     <input
                       id="newUserUsername"
@@ -245,10 +327,15 @@ export function SettingsDialog({
                       autoComplete="off"
                       required
                       value={newUser.username}
-                      onChange={(event) => setNewUser((value) => ({ ...value, username: event.target.value }))}
+                      onChange={(event) =>
+                        setNewUser((value) => ({
+                          ...value,
+                          username: event.target.value,
+                        }))
+                      }
                     />
                   </label>
-                  <label htmlFor="newUserPassword">
+                  <label className="dlg-field" htmlFor="newUserPassword">
                     初始密码
                     <input
                       id="newUserPassword"
@@ -258,63 +345,121 @@ export function SettingsDialog({
                       required
                       type="password"
                       value={newUser.password}
-                      onChange={(event) => setNewUser((value) => ({ ...value, password: event.target.value }))}
+                      onChange={(event) =>
+                        setNewUser((value) => ({
+                          ...value,
+                          password: event.target.value,
+                        }))
+                      }
                     />
                   </label>
-                  <label htmlFor="newUserRole">
+                  <label className="dlg-field" htmlFor="newUserRole">
                     角色
                     <select
                       id="newUserRole"
                       name="role"
                       value={newUser.role}
-                      onChange={(event) => setNewUser((value) => ({ ...value, role: event.target.value }))}
+                      onChange={(event) =>
+                        setNewUser((value) => ({
+                          ...value,
+                          role: event.target.value,
+                        }))
+                      }
                     >
                       <option value="user">普通用户</option>
                       <option value="admin">管理员</option>
                     </select>
                   </label>
-                  <button disabled={creating} type="submit">
-                    {creating ? "添加中" : "添加用户"}
+                  <button
+                    className="dlg-btn dlg-btn-primary"
+                    disabled={
+                      creating ||
+                      !newUser.username.trim() ||
+                      newUser.password.length < 8
+                    }
+                    type="submit"
+                  >
+                    {creating ? "添加中…" : "添加用户"}
                   </button>
                 </form>
-                <div className="user-list">
+                <div className="dlg-user-list">
                   {users.length === 0 ? (
-                    <div className="empty-state compact">还没有用户</div>
+                    <p className="dlg-quiet dlg-user-empty">还没有用户</p>
                   ) : (
-                    users.map((user) => (
-                      <article className="user-item" key={user.user_id}>
-                        <div className="user-main">
-                          <span className="user-name">{user.username}</span>
-                          <span className="user-meta">
-                            {user.role === "admin" ? "管理员" : "普通用户"} · {user.enabled ? "启用" : "停用"}
+                    users.map((user) => {
+                      const isSelf = user.user_id === currentUser?.user_id;
+                      return (
+                        <div
+                          className={`dlg-user-row ${user.enabled ? "" : "dlg-off"}`}
+                          key={user.user_id}
+                        >
+                          <span className="dlg-avatar" aria-hidden="true">
+                            {user.username.slice(0, 1).toUpperCase()}
                           </span>
+                          <div className="dlg-user-main">
+                            <strong>
+                              {user.username}
+                              {isSelf ? <em>（你）</em> : null}
+                            </strong>
+                            <small>
+                              {user.role === "admin" ? "管理员" : "普通用户"} ·{" "}
+                              {user.enabled ? "启用" : "已停用"}
+                            </small>
+                          </div>
+                          {isSelf ? null : (
+                            <span className="dlg-user-acts">
+                              <button
+                                className="dlg-text-btn"
+                                type="button"
+                                onClick={() =>
+                                  onToggleUser(user.user_id, !user.enabled)
+                                }
+                              >
+                                {user.enabled ? "停用" : "启用"}
+                              </button>
+                              <button
+                                className="dlg-text-btn"
+                                type="button"
+                                onClick={() =>
+                                  onResetUserPassword(user.user_id)
+                                }
+                              >
+                                重置密码
+                              </button>
+                              <button
+                                className="dlg-text-btn dlg-text-danger"
+                                type="button"
+                                onClick={() =>
+                                  onDeleteUser(user.user_id, user.username)
+                                }
+                              >
+                                删除
+                              </button>
+                            </span>
+                          )}
                         </div>
-                        <div className="user-actions">
-                          <button type="button" onClick={() => onToggleUser(user.user_id, !user.enabled)}>
-                            {user.enabled ? "停用" : "启用"}
-                          </button>
-                          <button type="button" onClick={() => onResetUserPassword(user.user_id)}>
-                            重置密码
-                          </button>
-                          <button className="danger-action" type="button" onClick={() => onDeleteUser(user.user_id, user.username)}>
-                            删除
-                          </button>
-                        </div>
-                      </article>
-                    ))
+                      );
+                    })
                   )}
                 </div>
               </section>
             ) : null}
 
             {activeSection === "account" ? (
-              <section className="settings-panel" aria-labelledby="accountSettingsTitle">
-                <div className="settings-panel-title">
-                  <h3 id="accountSettingsTitle">账户安全</h3>
-                </div>
-                <form className="settings-form settings-form-card" onSubmit={changePassword}>
+              <section
+                className="dlg-settings-panel"
+                aria-labelledby="accountSettingsTitle"
+              >
+                <h3 id="accountSettingsTitle" className="dlg-section-title">
+                  账户安全
+                </h3>
+                <form
+                  className="dlg-settings-form"
+                  noValidate
+                  onSubmit={changePassword}
+                >
                   <input
-                    className="visually-hidden"
+                    className="dlg-visually-hidden"
                     tabIndex={-1}
                     autoComplete="username"
                     name="username"
@@ -322,7 +467,7 @@ export function SettingsDialog({
                     readOnly
                     aria-hidden="true"
                   />
-                  <label htmlFor="currentPassword">
+                  <label className="dlg-field" htmlFor="currentPassword">
                     当前密码
                     <input
                       id="currentPassword"
@@ -331,10 +476,15 @@ export function SettingsDialog({
                       required
                       type="password"
                       value={passwords.current_password}
-                      onChange={(event) => setPasswords((value) => ({ ...value, current_password: event.target.value }))}
+                      onChange={(event) =>
+                        setPasswords((value) => ({
+                          ...value,
+                          current_password: event.target.value,
+                        }))
+                      }
                     />
                   </label>
-                  <label htmlFor="newPassword">
+                  <label className="dlg-field" htmlFor="newPassword">
                     新密码
                     <input
                       id="newPassword"
@@ -344,12 +494,27 @@ export function SettingsDialog({
                       required
                       type="password"
                       value={passwords.new_password}
-                      onChange={(event) => setPasswords((value) => ({ ...value, new_password: event.target.value }))}
+                      onChange={(event) =>
+                        setPasswords((value) => ({
+                          ...value,
+                          new_password: event.target.value,
+                        }))
+                      }
                     />
+                    <small>至少 8 位</small>
                   </label>
-                  <div className="settings-actions">
-                    <button disabled={changing} type="submit">
-                      {changing ? "保存中" : "保存密码"}
+                  {passwordError ? (
+                    <p className="dlg-error" role="alert">
+                      {passwordError}
+                    </p>
+                  ) : null}
+                  <div>
+                    <button
+                      className="dlg-btn dlg-btn-primary"
+                      disabled={changing}
+                      type="submit"
+                    >
+                      {changing ? "保存中…" : "保存密码"}
                     </button>
                   </div>
                 </form>
@@ -358,7 +523,7 @@ export function SettingsDialog({
           </div>
         </div>
       </section>
-    </div>
+    </DialogOverlay>
   );
 }
 
@@ -376,10 +541,11 @@ function numberValue(value: string): number {
   return Math.max(1, Math.round(parsed));
 }
 
-function activeLabel(section: SettingsSection): string {
-  if (section === "users") return "用户管理";
-  if (section === "account") return "账户安全";
-  return "系统设置";
+function semanticTone(status: string): "ok" | "warn" | "bad" | "idle" {
+  if (status === "ready") return "ok";
+  if (status === "indexing" || status === "degraded") return "warn";
+  if (status === "unavailable") return "bad";
+  return "idle";
 }
 
 function semanticStatusLabel(status: string | undefined): string {

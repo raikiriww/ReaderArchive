@@ -21,6 +21,7 @@ It packages a web app, an API service, PostgreSQL, SingleFile, yt-dlp, and a bro
 ## Features
 
 - Save web pages as local archives.
+- Read saved pages inside Reader, as the original snapshot or as extracted text.
 - Download public videos when yt-dlp supports the source.
 - Add RSS feeds and archive new articles automatically.
 - Search all saved items by title, original text, tags, URL, or a description; narrow by type, source, date, and read state.
@@ -28,11 +29,34 @@ It packages a web app, an API service, PostgreSQL, SingleFile, yt-dlp, and a bro
 - Open a protected browser desktop for sites that need manual login.
 - Keep archive files and browser data in local folders for backup.
 
+## Using Reader
+
+The sidebar holds **未读**, **全部存档**, and your tags; feed management,
+the browser desktop, and settings sit at the bottom. **未读** lists every unread
+archive, from manual saves and RSS alike, with tasks that still need you
+(queued, saving, waiting for manual preparation, or failed) at the top.
+**全部存档** can be narrowed by source and by state. A tag view can add a
+second tag to show only items that carry both.
+
+Press **N**, click **保存网页**, or paste an http(s) address anywhere outside a
+text field to save a page. Clicking an item opens it in a reading window over
+the list; Cmd/Ctrl-click, middle-click, or **Shift+Enter** opens it in its own
+tab instead. The reading window shows the saved snapshot with page scripts
+disabled, or the extracted text (**V**). Opening an item does not mark it read:
+press **E** or use the read toggle in the reading window. Read items leave
+**未读** when the reading window closes.
+
+The reading window also renames items (**R** or click the title), edits tags
+(**T**), switches between saved versions of the same address, and opens a
+details panel (**I**) with files, re-archiving, and task information. Use
+**J**/**K** to move between items, **Esc** to close, and **?** to list all
+shortcuts.
+
 ## Preparing a page before saving
 
-When creating an archive, or in the **重新归档** confirmation dialog, check
+When saving a page, or under **重新归档** in an item's details panel, check
 **保存前手动处理** to open a page and wait before
-saving. Open the task's **切回处理页面** button to use the built-in browser,
+saving. Open the task from **未读** and use **切回处理页面** to use the built-in browser,
 close popups, expand quotations, or load the content you need. Then click
 **处理完成，保存当前页面**. Reader captures that same tab without reloading
 it. The checkbox applies to one submission and resets afterward.
@@ -46,14 +70,13 @@ Normal automatic saves and RSS imports keep their existing behavior.
 
 ## Finding saved content
 
-The address field at the top still saves a page directly. Choose **搜索存档**
-or press **Cmd/Ctrl+K** to search without interrupting a save. Search includes
-read items by default; filters make the current scope explicit.
+Press **/** or **Cmd/Ctrl+K** to search from the top of the list. Search
+includes read items by default; filters make the current scope explicit.
 
-Results show the actual matching text. Open a preview, read the extracted
-original text at the match, or open the original archive with its images and
-layout. Returning to results preserves your place. Identical saved URLs are
-grouped with links to their available versions; URLs with different query
+Results show the actual matching text. Opening a result in text view jumps to
+the first match; the snapshot view keeps the original images and layout.
+Closing the reading window returns to the same results. Identical saved URLs
+are grouped with a count of their saved versions; URLs with different query
 parameters remain separate.
 
 Choose **只匹配原词** to require the entered words, or put an exact phrase in

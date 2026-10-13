@@ -9,6 +9,8 @@ import {
   archiveTasksListArchiveTags,
   archiveTasksListArchiveTaskFiles,
   archiveTasksListArchiveTasks,
+  archiveTasksListArchiveTaskVersions,
+  archiveTasksReadArchiveTask,
   archiveTasksMarkArchiveTaskRead,
   archiveTasksOpenArchiveTaskInBrowser,
   archiveTasksOpenManualActionInBrowser,
@@ -163,8 +165,10 @@ export async function listArchiveTasks(options: {
   includeRead: boolean;
   limit: number;
   offset?: number;
-  status?: "running" | "failed";
+  status?: "running" | "failed" | "attention" | "problem" | "succeeded";
+  source?: "manual" | "rss";
   tags: string[];
+  tagsMatch?: "any" | "all";
   q?: string;
   title?: string;
 }): Promise<ArchiveTaskListRead> {
@@ -175,7 +179,9 @@ export async function listArchiveTasks(options: {
         limit: options.limit,
         offset: options.offset ?? 0,
         status: options.status || null,
+        ...(options.source ? { source: options.source } : {}),
         tags: options.tags.length ? options.tags : null,
+        ...(options.tagsMatch && options.tagsMatch !== "any" ? { tags_match: options.tagsMatch } : {}),
         q: options.q || null,
         title: options.title || null,
       },
@@ -210,6 +216,14 @@ export async function listArchiveTaskFiles(taskId: string): Promise<ArchiveTaskF
 
 export async function markArchiveTaskRead(taskId: string): Promise<void> {
   await readGenerated(archiveTasksMarkArchiveTaskRead({ path: { task_id: taskId } }));
+}
+
+export async function setArchiveTaskRead(taskId: string, isRead: boolean): Promise<ArchiveTaskRead> {
+  return updateArchiveTask(taskId, { is_read: isRead });
+}
+
+export async function listArchiveTaskVersions(taskId: string): Promise<ArchiveTaskRead[]> {
+  return readGenerated<ArchiveTaskRead[]>(archiveTasksListArchiveTaskVersions({ path: { task_id: taskId } }));
 }
 
 export async function rearchiveTask(taskId: string, prepareManually = false): Promise<ArchiveTaskRead> {
@@ -350,4 +364,10 @@ async function parseResponseError(response: Response): Promise<string> {
   } catch {
     return `请求失败：${response.status}`;
   }
+}
+
+// --- workstream B ---
+
+export async function readArchiveTask(taskId: string): Promise<ArchiveTaskRead> {
+  return readGenerated<ArchiveTaskRead>(archiveTasksReadArchiveTask({ path: { task_id: taskId } }));
 }

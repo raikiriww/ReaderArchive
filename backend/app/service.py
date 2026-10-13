@@ -186,6 +186,8 @@ class ArchiveTaskService:
         title_query: str | None = None,
         query: str | None = None,
         status_filter: str | None = None,
+        source: str | None = None,
+        tags_match: str = "any",
     ) -> ArchiveTaskListRead:
         tag_filters = self._clean_tags([*(tags or []), *([tag] if tag else [])])
         statuses = self._task_statuses_for_filter(status_filter)
@@ -194,15 +196,15 @@ class ArchiveTaskService:
             from app.search import search_archive
 
             page = search_archive(self, query=cleaned_query, limit=limit, offset=offset,
-                include_read=include_read, tags=tag_filters, content_type="all", source=None,
+                include_read=include_read, tags=tag_filters, content_type="all", source=source,
                 date_from=None, exact=False, sort="relevance", statuses=statuses,
-                group_duplicates=False)
+                group_duplicates=False, tags_match=tags_match)
             # Legacy list clients use None to distinguish title-only matching.
             items = [task.model_copy(update={"search_match": None})
                 if task.search_match and task.search_match.kind in {"title", "tag", "url"}
                 else task for task in page.items]
-            return ArchiveTaskListRead(items=items, total=page.total, limit=limit,
-                offset=offset, has_more=page.has_more)
+            return ArchiveTaskListRead(items=self._with_summaries(items), total=page.total,
+                limit=limit, offset=offset, has_more=page.has_more)
         tasks, total = self.repository.list_recent(
             limit,
             offset=offset,
@@ -210,14 +212,20 @@ class ArchiveTaskService:
             tags=tag_filters,
             title_query=cleaned_query,
             statuses=statuses,
+            source=source,
+            tags_match=tags_match,
         )
         return ArchiveTaskListRead(
-            items=[self._with_existing_result_files(task) for task in tasks],
+            items=self._with_summaries([self._with_existing_result_files(task) for task in tasks]),
             total=total,
             limit=limit,
             offset=offset,
             has_more=offset + len(tasks) < total,
         )
+
+    def _with_summaries(self, items: list[ArchiveTaskRead]) -> list[ArchiveTaskRead]:
+        summaries = self.repository.get_search_document_summaries([task.task_id for task in items])
+        return [task.model_copy(update={"summary": summaries.get(task.task_id)}) for task in items]
 
     def search_tasks(
         self, query: str, limit: int = 20, offset: int = 0,
@@ -250,7 +258,11 @@ class ArchiveTaskService:
         custom_title_provided: bool = False,
         custom_title: str | None = None,
         tags: list[str] | None = None,
+        is_read: bool | None = None,
     ) -> ArchiveTaskRead | None:
+        if is_read is not None:
+            if not self.repository.set_read(task_id, is_read):
+                return None
         if custom_title_provided:
             if not self.repository.update_custom_title(
                 task_id,
@@ -267,6 +279,12 @@ class ArchiveTaskService:
 
     def mark_task_read(self, task_id: str) -> None:
         self.repository.mark_read(task_id)
+
+    def list_task_versions(self, task_id: str) -> list[ArchiveTaskRead] | None:
+        versions = self.repository.list_versions(task_id)
+        if versions is None:
+            return None
+        return [self._with_existing_result_files(task) for task in versions]
 
     async def rearchive_task(self, task_id: str, prepare_manually: bool = False) -> ArchiveTaskRead:
         task = self.repository.get(task_id)
@@ -1475,6 +1493,17 @@ class ArchiveTaskService:
             ]
         if value == "failed":
             return [ArchiveTaskStatus.FAILED]
+        if value == "attention":
+            return [
+                ArchiveTaskStatus.QUEUED,
+                ArchiveTaskStatus.RUNNING,
+                ArchiveTaskStatus.MANUAL_ACTION_REQUIRED,
+                ArchiveTaskStatus.FAILED,
+            ]
+        if value == "problem":
+            return [ArchiveTaskStatus.MANUAL_ACTION_REQUIRED, ArchiveTaskStatus.FAILED]
+        if value == "succeeded":
+            return [ArchiveTaskStatus.SUCCEEDED]
         return None
 
     def _should_update_entry_title(

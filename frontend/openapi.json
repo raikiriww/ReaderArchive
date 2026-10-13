@@ -646,7 +646,10 @@
                 {
                   "enum": [
                     "running",
-                    "failed"
+                    "failed",
+                    "attention",
+                    "problem",
+                    "succeeded"
                   ],
                   "type": "string"
                 },
@@ -655,6 +658,40 @@
                 }
               ],
               "title": "Status"
+            }
+          },
+          {
+            "name": "source",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "manual",
+                    "rss"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Source"
+            }
+          },
+          {
+            "name": "tags_match",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "any",
+                "all"
+              ],
+              "type": "string",
+              "default": "any",
+              "title": "Tags Match"
             }
           }
         ],
@@ -1065,6 +1102,57 @@
         "responses": {
           "204": {
             "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/archive-tasks/{task_id}/versions": {
+      "get": {
+        "tags": [
+          "archive-tasks"
+        ],
+        "summary": "List Archive Task Versions",
+        "operationId": "archive-tasks-list_archive_task_versions",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Task Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ArchiveTaskRead"
+                  },
+                  "title": "Response Archive-Tasks-List Archive Task Versions"
+                }
+              }
+            }
           },
           "422": {
             "description": "Validation Error",
@@ -2494,6 +2582,17 @@
               }
             ],
             "title": "Error"
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Summary"
           }
         },
         "type": "object",
@@ -2735,6 +2834,17 @@
               }
             ],
             "title": "Tags"
+          },
+          "is_read": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Read"
           }
         },
         "type": "object",

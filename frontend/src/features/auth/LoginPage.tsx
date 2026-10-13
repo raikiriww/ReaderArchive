@@ -1,7 +1,5 @@
 import { type FormEvent, useState } from "react";
 import { login } from "../../api/client";
-import { Button } from "../../components/ui/button";
-import { Input } from "../../components/ui/input";
 
 export function LoginPage(): JSX.Element {
   const [username, setUsername] = useState("");
@@ -18,38 +16,44 @@ export function LoginPage(): JSX.Element {
       const next = new URLSearchParams(window.location.search).get("next");
       window.location.href = next?.startsWith("/") ? next : "/";
     } catch (error) {
-      const status = typeof error === "object" && error !== null && "status" in error ? error.status : null;
-      setMessage(status === 429 ? "尝试次数过多，请稍后再试" : "用户名或密码不正确");
+      const status =
+        typeof error === "object" && error !== null && "status" in error
+          ? error.status
+          : null;
+      setMessage(
+        status === 429 ? "尝试次数过多，请稍后再试" : "用户名或密码不正确",
+      );
     } finally {
       setSubmitting(false);
     }
   }
 
   return (
-    <main className="login-view">
-      <form className="login-panel" onSubmit={submit}>
-        <div className="login-brand">
-          <img className="brand-mark" src="/static/favicon.svg" alt="" aria-hidden="true" />
+    <main className="dlg-login-view">
+      <form className="dlg-login-panel" onSubmit={submit}>
+        <div className="dlg-login-brand">
+          <img src="/static/favicon.svg" alt="" aria-hidden="true" />
           <div>
             <h1>Reader Archive</h1>
             <p>登录后继续使用网页存档服务</p>
           </div>
         </div>
-        <label htmlFor="loginUsername">
+        <label className="dlg-field" htmlFor="loginUsername">
           用户名
-          <Input
+          <input
             id="loginUsername"
             name="username"
             autoComplete="username"
+            // biome-ignore lint/a11y/noAutofocus: the login page has a single purpose
             autoFocus
             required
             value={username}
             onChange={(event) => setUsername(event.target.value)}
           />
         </label>
-        <label htmlFor="loginPassword">
+        <label className="dlg-field" htmlFor="loginPassword">
           密码
-          <Input
+          <input
             id="loginPassword"
             name="password"
             autoComplete="current-password"
@@ -59,10 +63,14 @@ export function LoginPage(): JSX.Element {
             onChange={(event) => setPassword(event.target.value)}
           />
         </label>
-        <Button disabled={submitting} type="submit">
-          {submitting ? "登录中" : "登录"}
-        </Button>
-        <p className="login-message" role="alert">
+        <button
+          className="dlg-btn dlg-btn-primary dlg-btn-big"
+          disabled={submitting}
+          type="submit"
+        >
+          {submitting ? "登录中…" : "登录"}
+        </button>
+        <p className="dlg-error dlg-login-message" role="alert">
           {message}
         </p>
       </form>
