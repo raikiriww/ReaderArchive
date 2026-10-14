@@ -28,17 +28,54 @@ jobs:
     permissions:
       contents: read
       packages: write
+      pull-requests: read
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Free disk space for bundled search models
+      # Pull requests that only touch documentation skip the image build but
+      # still report this job, which branch protection requires.
+      - name: Detect docs-only pull request
+        id: changes
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android
-          df -h /
+          files="$(gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/files" \
+            --jq '.[] | .filename, (.previous_filename // empty)')"
+          printf '%s\n' "$files"
+          code_files="$(printf '%s\n' "$files" | grep -vE '^(docs|designs)/|\.md$' || true)"
+          if [ -n "$files" ] && [ -z "$code_files" ]; then
+            echo "Docs-only change: skipping the Docker build and verification."
+            echo "docs_only=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "docs_only=false" >> "$GITHUB_OUTPUT"
+          fi
 
+      # The docker driver builds straight into the daemon's image store, so the
+      # multi-GB image is not exported as a tarball and imported again.
       - name: Set up Docker Buildx
+        if: steps.changes.outputs.docs_only != 'true'
         uses: docker/setup-buildx-action@v3
+        with:
+          driver: docker
+
+      # Registry pulls occasionally hang (one run waited 17 minutes on an 87 kB
+      # layer). Fetch the base image up front with a timeout and retries; the
+      # real build reuses it from the builder cache. A one-line BuildKit build
+      # pulls about 3x faster than `docker pull`.
+      - name: Pull base image
+        if: steps.changes.outputs.docs_only != 'true'
+        run: |
+          base_image="$(awk '/^FROM /{image=$2} END{print image}' Dockerfile)"
+          for attempt in 1 2 3; do
+            if echo "FROM $base_image" | timeout 300 docker buildx build --progress=plain -; then
+              exit 0
+            fi
+            echo "::warning::Pulling $base_image failed or timed out (attempt $attempt)"
+          done
+          exit 1
 
       - name: Extract metadata
         id: meta
@@ -57,25 +94,24 @@ jobs:
           docker compose -f compose.yaml -f compose.build.yaml config >/dev/null
 
       - name: Build local verification image
+        if: steps.changes.outputs.docs_only != 'true'
         uses: docker/build-push-action@v6
         with:
           context: .
           platforms: linux/amd64
-          load: true
           push: false
           tags: reader/archive-desktop:ci
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
 
       - name: Run Docker verification
+        if: steps.changes.outputs.docs_only != 'true'
         env:
           READER_IMAGE: reader/archive-desktop:ci
           READER_VERIFY_SKIP_BUILD: "true"
         run: scripts/verify_in_docker.sh
 
       - name: Stop verification containers
-        if: always()
+        if: always() && steps.changes.outputs.docs_only != 'true'
         run: docker compose -p reader_verify -f compose.yaml -f compose.build.yaml down -v
 
       - name: Log in to GHCR
