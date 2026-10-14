@@ -320,7 +320,27 @@ function Snapshot({ item }) {
       <div className="art-site">{item.source === "rss" ? item.feed : hostOf(item.url)}<span className="snap-note">示例快照</span></div>
       <h1>{item.title}</h1>
       <div className="art-meta">{hostOf(item.url)} · {fullDate(item.at).slice(0, 10)}</div>
+      {item.video ? <ArchivedPlayer note="网页里原来的播放器，换成了下载的视频" /> : null}
       {paragraphs(body).slice(0, 10).map((p, i) => <p key={i}>{p}</p>)}
+    </div>
+  );
+}
+
+// Stand-in for a <video controls> playing the yt-dlp download; the prototype has no real video.
+function ArchivedPlayer({ note }) {
+  return (
+    <div className="archived-player" title="示例：播放下载的视频">
+      <span className="ap-play" aria-hidden="true">▶</span>
+      <span className="ap-bar" aria-hidden="true"><span></span></span>
+      <span className="ap-note">{note}</span>
+    </div>
+  );
+}
+
+function VideoPane() {
+  return (
+    <div className="video-pane">
+      <ArchivedPlayer note="下载的视频" />
     </div>
   );
 }
@@ -519,6 +539,7 @@ function Reader(props) {
               <div className="seg">
                 <button type="button" className={mode === "archive" ? "on" : ""} onClick={() => onMode("archive")} title="存档原貌 V"><Icon name="page" size={14} />原貌</button>
                 <button type="button" className={mode === "text" ? "on" : ""} onClick={() => onMode("text")} title="提取的正文 V"><Icon name="text" size={14} />正文</button>
+                {item.video ? <button type="button" className={mode === "video" ? "on" : ""} onClick={() => onMode("video")} title="下载的视频"><Icon name="video" size={14} />视频</button> : null}
               </div>
             ) : null}
             {done && container !== "tab" ? <button className="ghost-icon" type="button" title="在新标签页阅读" onClick={onOpenTab}><Icon name="maximize" size={15} /></button> : null}
@@ -550,8 +571,10 @@ function Reader(props) {
       <div className="reader-body">
         {!done ? (
           <StatusPanel item={item} onOpenAction={onOpenAction} onResume={onResume} onRetry={onRearchive} onDelete={onDelete} />
-        ) : mode === "archive" ? (
+        ) : mode === "archive" || (mode === "video" && !item.video) ? (
           <div className="frame-wrap bare"><div className="frame"><Snapshot item={item} /></div></div>
+        ) : mode === "video" ? (
+          <VideoPane />
         ) : (
           <TextView item={item} query={searchQuery} />
         )}
