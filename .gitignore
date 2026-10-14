@@ -15,5 +15,6 @@ htmlcov/
 data/
 .local_eval/
 .local_verify/
-# Local design history includes screenshots of a private archive library.
-/designs/search-redesign/
+# Design prototypes use synthetic demo data only; never commit real archive snapshots.
+/designs/**/_samples/
+/designs/reader-redesign/
