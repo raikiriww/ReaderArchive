@@ -13,6 +13,7 @@ import {
   Pencil,
   RefreshCw,
   Trash2,
+  Video,
   X,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
@@ -20,7 +21,7 @@ import { usePopover } from "../../components/Popover";
 import type { ArchiveTask } from "../../types/domain";
 import { formatDate, sourceLabelFor, taskTitle } from "../../utils/format";
 import { DetailsDrawer } from "./DetailsDrawer";
-import { archiveFileUrl, Snapshot } from "./Snapshot";
+import { archivedVideoUrl, archiveFileUrl, Snapshot, snapshotSource, VideoView } from "./Snapshot";
 import { StatusPanel } from "./StatusPanel";
 import { TagEditor } from "./TagEditor";
 import { TextView } from "./TextView";
@@ -60,6 +61,9 @@ export function Reader(props: ReaderProps): JSX.Element {
   const title = taskTitle(task);
   const waiting = task.status === "manual_action_required";
   const fileHref = archiveFileHref(task);
+  // The snapshot shows the video itself when there is no page, so the tab is only for pages.
+  const videoSrc = snapshotSource(task).kind === "video" ? null : archivedVideoUrl(task);
+  const view = mode === "video" && !videoSrc ? "archive" : mode;
   const { setOpen: setMenuOpen } = menu;
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: reset local UI only when the task changes
@@ -195,8 +199,8 @@ export function Reader(props: ReaderProps): JSX.Element {
               <div className="rd-seg" role="group" aria-label="阅读方式">
                 <button
                   type="button"
-                  className={mode === "archive" ? "on" : ""}
-                  aria-pressed={mode === "archive"}
+                  className={view === "archive" ? "on" : ""}
+                  aria-pressed={view === "archive"}
                   onClick={() => onModeChange("archive")}
                   title="存档原貌 V"
                 >
@@ -213,6 +217,18 @@ export function Reader(props: ReaderProps): JSX.Element {
                   <AlignLeft size={14} aria-hidden="true" />
                   正文
                 </button>
+                {videoSrc ? (
+                  <button
+                    type="button"
+                    className={view === "video" ? "on" : ""}
+                    aria-pressed={view === "video"}
+                    onClick={() => onModeChange("video")}
+                    title="下载的视频"
+                  >
+                    <Video size={14} aria-hidden="true" />
+                    视频
+                  </button>
+                ) : null}
               </div>
             ) : null}
             {done && container === "popup" && onOpenInTab ? (
@@ -321,10 +337,12 @@ export function Reader(props: ReaderProps): JSX.Element {
       <div className="rd-body">
         {!done ? (
           <StatusPanel task={task} actions={actions} />
-        ) : mode === "archive" ? (
+        ) : view === "archive" ? (
           <div className="rd-frame-wrap">
             <Snapshot task={task} />
           </div>
+        ) : view === "video" && videoSrc ? (
+          <VideoView src={videoSrc} />
         ) : (
           <TextView task={task} searchQuery={searchQuery} />
         )}

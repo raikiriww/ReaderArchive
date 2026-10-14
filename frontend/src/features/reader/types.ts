@@ -4,7 +4,8 @@ import type { ArchiveTag, ArchiveTask } from "../../types/domain";
 // Contract shared by the shell/list workstream and the reader workstream.
 // See docs/frontend-redesign-plan.md §3.2 before changing it.
 
-export type ReaderMode = "archive" | "text";
+/** "video" is offered only when a page snapshot also has a downloaded video. */
+export type ReaderMode = "archive" | "text" | "video";
 
 export interface ReaderNav {
   label: string;

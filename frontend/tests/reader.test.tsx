@@ -5,7 +5,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { DetailsDrawer, drawerNotices } from "../src/features/reader/DetailsDrawer";
 import { Reader } from "../src/features/reader/Reader";
 import { ReaderPopup } from "../src/features/reader/ReaderPopup";
-import { Snapshot, snapshotLinkTarget, snapshotSource } from "../src/features/reader/Snapshot";
+import { isDeadVideoSource, Snapshot, snapshotLinkTarget, snapshotSource } from "../src/features/reader/Snapshot";
 import { StatusPanel } from "../src/features/reader/StatusPanel";
 import { TagEditor } from "../src/features/reader/TagEditor";
 import { cleanSearchQuery, countHitParagraphs, highlightText, TextView } from "../src/features/reader/TextView";
@@ -121,6 +121,20 @@ describe("snapshot source", () => {
     expect(snapshotLinkTarget("mailto:a@example.com", "mailto:a@example.com")).toBeNull();
     expect(snapshotLinkTarget(null, page)).toBeNull();
   });
+
+  test("treats snapshot videos without a playable source as dead", () => {
+    expect(isDeadVideoSource(null, [])).toBe(true);
+    expect(isDeadVideoSource("", [])).toBe(true);
+    expect(isDeadVideoSource("blob:https://www.youtube.com/1f2e", [])).toBe(true);
+    expect(isDeadVideoSource(null, ["", null])).toBe(true);
+    expect(isDeadVideoSource("https://example.com/clip.mp4", [])).toBe(false);
+    expect(isDeadVideoSource(null, ["data:video/mp4;base64,AAAA"])).toBe(false);
+  });
+
+  test("lets the snapshot go fullscreen", () => {
+    const task = archiveTask({ result: { ...archiveTask().result, video_file_name: "clip.mp4" } });
+    expect(render(<Snapshot task={task} />)).toContain("allowFullScreen");
+  });
 });
 
 describe("reader header", () => {
@@ -190,6 +204,27 @@ describe("reader header", () => {
     expect(html).not.toContain("<iframe");
     expect(html).not.toContain("rd-read-state");
     expect(html).not.toContain("在新标签页阅读");
+  });
+
+  test("offers the video tab only when a page snapshot also has a video", () => {
+    const withVideo = archiveTask({ result: { ...archiveTask().result, video_file_name: "clip.mp4" } });
+    const html = render(<Reader {...readerProps({ task: withVideo })} />);
+    expect(html).toContain("视频");
+    expect(render(<Reader {...readerProps()} />)).not.toContain("视频</button>");
+    const videoOnly = archiveTask({
+      result: { ...archiveTask().result, file_name: null, video_file_name: "clip.mp4" },
+    });
+    expect(render(<Reader {...readerProps({ task: videoOnly })} />)).not.toContain("视频</button>");
+  });
+
+  test("plays the video in video mode and falls back to the snapshot without one", () => {
+    const withVideo = archiveTask({ result: { ...archiveTask().result, video_file_name: "clip.mp4" } });
+    const html = render(<Reader {...readerProps({ task: withVideo, mode: "video" })} />);
+    expect(html).toContain('<video class="rd-video"');
+    expect(html).toContain("/files/clip.mp4");
+    expect(html).not.toContain("<iframe");
+    const fallback = render(<Reader {...readerProps({ mode: "video" })} />);
+    expect(fallback).toContain('sandbox="allow-same-origin"');
   });
 
   test("renders the details drawer when open", () => {
