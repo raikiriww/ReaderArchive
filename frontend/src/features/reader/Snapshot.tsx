@@ -35,8 +35,33 @@ function isEditable(target: EventTarget | null): boolean {
   return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
 }
 
-/** Re-dispatches keydown from the snapshot document on `window` so shortcuts keep working. */
-function forwardKeys(event: SyntheticEvent<HTMLIFrameElement>): void {
+/**
+ * Returns the URL a snapshot link should open in a new tab, or null to leave the click alone.
+ * In-page `#anchor` links keep scrolling the snapshot; only http(s) links leave it.
+ */
+export function snapshotLinkTarget(rawHref: string | null, resolvedHref: string): string | null {
+  if (rawHref === null || rawHref.trim().startsWith("#")) return null;
+  return /^https?:\/\//i.test(resolvedHref) ? resolvedHref : null;
+}
+
+/** The sandbox blocks popups, so link clicks are opened in a new tab from the app instead. */
+function openLinksInNewTab(doc: Document): void {
+  const handle = (inner: MouseEvent) => {
+    if (inner.defaultPrevented || (inner.type === "auxclick" && inner.button !== 1)) return;
+    const target = inner.target as Element | null;
+    const anchor = typeof target?.closest === "function" ? target.closest("a[href]") : null;
+    if (!anchor) return;
+    const url = snapshotLinkTarget(anchor.getAttribute("href"), (anchor as HTMLAnchorElement).href);
+    if (!url) return;
+    inner.preventDefault();
+    window.open(url, "_blank", "noopener,noreferrer");
+  };
+  doc.addEventListener("click", handle);
+  doc.addEventListener("auxclick", handle);
+}
+
+/** Wires up the snapshot document: shortcuts keep working and links open in a new tab. */
+function wireSnapshot(event: SyntheticEvent<HTMLIFrameElement>): void {
   let doc: Document | null = null;
   try {
     doc = event.currentTarget.contentDocument;
@@ -44,6 +69,8 @@ function forwardKeys(event: SyntheticEvent<HTMLIFrameElement>): void {
     doc = null;
   }
   if (!doc) return;
+  openLinksInNewTab(doc);
+  // Re-dispatch keydown on `window` so shortcuts keep working while the snapshot has focus.
   doc.addEventListener("keydown", (inner) => {
     if (inner.defaultPrevented || isEditable(inner.target)) return;
     window.dispatchEvent(
@@ -71,12 +98,12 @@ export function Snapshot({ task }: { task: ArchiveTask }): JSX.Element {
         title="存档原貌"
         sandbox="allow-same-origin"
         src={source.src}
-        onLoad={forwardKeys}
+        onLoad={wireSnapshot}
       />
     );
   }
   if (source.kind === "pdf") {
-    return <iframe key={source.src} className="rd-frame" title="存档 PDF" src={source.src} onLoad={forwardKeys} />;
+    return <iframe key={source.src} className="rd-frame" title="存档 PDF" src={source.src} onLoad={wireSnapshot} />;
   }
   if (source.kind === "video") {
     return (

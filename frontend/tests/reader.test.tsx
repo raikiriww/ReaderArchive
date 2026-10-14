@@ -5,7 +5,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { DetailsDrawer, drawerNotices } from "../src/features/reader/DetailsDrawer";
 import { Reader } from "../src/features/reader/Reader";
 import { ReaderPopup } from "../src/features/reader/ReaderPopup";
-import { Snapshot, snapshotSource } from "../src/features/reader/Snapshot";
+import { Snapshot, snapshotLinkTarget, snapshotSource } from "../src/features/reader/Snapshot";
 import { StatusPanel } from "../src/features/reader/StatusPanel";
 import { TagEditor } from "../src/features/reader/TagEditor";
 import { cleanSearchQuery, countHitParagraphs, highlightText, TextView } from "../src/features/reader/TextView";
@@ -110,6 +110,16 @@ describe("snapshot source", () => {
     const html = render(<Snapshot task={task} />);
     expect(html).not.toContain("<iframe");
     expect(html).toContain("没有可以显示的文件");
+  });
+
+  test("opens http(s) links in a new tab but leaves in-page anchors alone", () => {
+    const page = "https://reader.test/api/v1/archive-tasks/task-1/files/page.html";
+    expect(snapshotLinkTarget("https://example.com/a", "https://example.com/a")).toBe("https://example.com/a");
+    expect(snapshotLinkTarget("//example.org/b", "https://example.org/b")).toBe("https://example.org/b");
+    expect(snapshotLinkTarget("#comments", `${page}#comments`)).toBeNull();
+    expect(snapshotLinkTarget("javascript:void(0)", "javascript:void(0)")).toBeNull();
+    expect(snapshotLinkTarget("mailto:a@example.com", "mailto:a@example.com")).toBeNull();
+    expect(snapshotLinkTarget(null, page)).toBeNull();
   });
 });
 
