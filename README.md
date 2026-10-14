@@ -104,10 +104,10 @@ memory for the two models; actual local verification used about 5 GiB for the
 application process, and startup on other CPU paths can use more.
 
 Implementation and measured limits are recorded in
-[the backend upgrade notes](docs/search-backend-upgrade.md) and
-[the search evaluation](docs/search-upgrade-evaluation.md).
+[the backend upgrade notes](docs/design/search/backend-upgrade.md) and
+[the search evaluation](docs/design/search/evaluation.md).
 CPU model selection and final verification are recorded in
-[the CPU upgrade notes](docs/search-cpu-upgrade.md).
+[the CPU upgrade notes](docs/design/search/cpu-upgrade.md).
 
 ## Requirements
 

@@ -1,3 +1,18 @@
+# AGENTS.md
+
+## 按需阅读
+
+| 你要做什么 | 先读 |
+|---|---|
+| 了解有哪些文档 | [docs/README.md](docs/README.md) |
+| 修改界面 | [docs/product/interface.md](docs/product/interface.md)、[designs/reader/AGENTS.md](designs/reader/AGENTS.md) |
+| 修改搜索 | [docs/design/search/](docs/design/search/README.md) |
+| 修改保存流程或网站规则 | [docs/design/manual-action/](docs/design/manual-action/README.md)、[docs/design/pdf-archive/](docs/design/pdf-archive/README.md) |
+| 写或改文档 | [docs/README.md](docs/README.md) 的写作规则 |
+| 修改 Docker 镜像或 compose | 下面的 Docker/部署兼容性 |
+
+本仓库是公开的。代码、文档、截图和原型都不能包含真实用户数据。
+
 ## Docker/部署兼容性
 
 修改容器运行行为时，优先把默认值放进镜像或应用自身，不要只依赖 compose 文件新增环境变量或启动参数。

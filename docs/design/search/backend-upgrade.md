@@ -1,8 +1,8 @@
 # 搜索后端实施与验收记录
 
-> 历史阶段记录，包含当时的方案、结果和未完成项。当前实现及最终验收以 [CPU 搜索升级](search-cpu-upgrade.md) 和 [发版验收](release-acceptance-20260905.md) 为准。
+> 历史阶段记录，包含当时的方案、结果和未完成项。当前实现及最终验收以 [CPU 搜索升级](cpu-upgrade.md) 和 [发版验收](../../acceptance/release-20260905.md) 为准。
 
-2026-09-05。本文供开发验收；检索质量与候选模型对照见 [search-upgrade-evaluation.md](search-upgrade-evaluation.md)。本次使用隔离 PostgreSQL 与合成资料，未清空或重建用户真实资料库。
+2026-09-05。本文供开发验收；检索质量与候选模型对照见 [evaluation.md](evaluation.md)。本次使用隔离 PostgreSQL 与合成资料，未清空或重建用户真实资料库。
 
 ## 实现范围
 
