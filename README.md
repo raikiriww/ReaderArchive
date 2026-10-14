@@ -6,9 +6,13 @@ It packages a web app, an API service, PostgreSQL, SingleFile, yt-dlp, and a bro
 
 ## Screenshots
 
-### Archive list and details
+### Archive list
 
-![Reader Archive list and details](docs/images/archive-list.webp)
+![Reader Archive unread list](docs/images/archive-list.webp)
+
+### Reader window
+
+![Reader Archive reader window](docs/images/reader.webp)
 
 ### Settings
 
