@@ -79,9 +79,7 @@ export function attachArchivedVideo(doc: Document, src: string): boolean {
     box.classList.remove("sf-hidden");
     box.replaceChildren(video);
     video.style.cssText = `display:block;width:100%;height:${collapsed ? "auto" : "100%"};aspect-ratio:${collapsed ? "16/9" : "auto"};background:#000;object-fit:contain`;
-    return true;
-  }
-  if (dead) {
+  } else if (dead) {
     for (const name of ["class", "style", "width", "height"]) {
       const value = dead.getAttribute(name);
       if (value !== null) video.setAttribute(name, value);
@@ -89,6 +87,9 @@ export function attachArchivedVideo(doc: Document, src: string): boolean {
     video.style.background = "#000";
     dead.replaceWith(video);
   }
+  // Players saved mid-playback keep their auto-hide state, e.g. YouTube's
+  // `.ytp-autohide { cursor: none }`, which the new video would inherit.
+  video.style.setProperty("cursor", "auto", "important");
   return true;
 }
 
