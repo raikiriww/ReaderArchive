@@ -126,11 +126,32 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         env:
           PUBLISH_TAGS: ${{ steps.meta.outputs.tags }}
+        # Registries occasionally answer a push with a transient 5xx (one
+        # release failed on a ghcr.io 503 after its main tags were published),
+        # so each push is retried with backoff before the step fails.
         run: |
+          push_with_retry() {
+            for attempt in 1 2 3; do
+              if docker push "$1"; then
+                return 0
+              fi
+              if [ "$attempt" -lt 3 ]; then
+                delay=$((attempt * 15))
+                echo "::warning::Pushing $1 failed (attempt $attempt), retrying in ${delay}s"
+                sleep "$delay"
+              fi
+            done
+            echo "::error::Pushing $1 failed after 3 attempts"
+            return 1
+          }
+
+          pushed=" "
           while IFS= read -r tag; do
             [ -n "$tag" ] || continue
+            case "$pushed" in *" $tag "*) continue ;; esac
             docker tag reader/archive-desktop:ci "$tag"
-            docker push "$tag"
+            push_with_retry "$tag"
+            pushed="$pushed$tag "
           done <<EOF
           $PUBLISH_TAGS
           EOF
