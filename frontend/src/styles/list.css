@@ -322,11 +322,54 @@
 .row-tag {
   color: var(--accent);
 }
-.row-video {
-  color: var(--muted);
+/* Archiving tools: the logo, with a dot when it is not simply done */
+.row-tools {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: none;
 }
-.row-warn {
-  color: var(--warn);
+.row-tool {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+}
+.row-tool img {
+  display: block;
+  max-width: 15px;
+  max-height: 15px;
+}
+.row-tool::after {
+  content: "";
+  position: absolute;
+  right: -2px;
+  bottom: -2px;
+  display: none;
+  width: 7px;
+  height: 7px;
+  border: 1.5px solid var(--surface);
+  border-radius: 50%;
+}
+.row-tool.running img {
+  opacity: 0.45;
+}
+.row-tool.running::after {
+  display: block;
+  background: var(--accent);
+}
+.row-tool.waiting::after {
+  display: block;
+  background: var(--warn);
+}
+.row-tool.failed img {
+  filter: grayscale(1);
+  opacity: 0.55;
+}
+.row-tool.failed::after {
+  display: block;
+  background: var(--danger);
 }
 .match-label {
   font-size: 11.5px;

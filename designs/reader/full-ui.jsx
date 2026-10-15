@@ -244,6 +244,33 @@ function StatusPill({ item }) {
   return null;
 }
 
+/* Which archiving tools to show on a row, and how each one went. yt-dlp shows only when it found a video or really failed. */
+function toolStates(item) {
+  const busy = item.status === "queued" || item.status === "running";
+  const waits = (target) => item.status === "manual_action_required" && (item.action || "").startsWith(target + ".");
+  const pageLost = item.status === "failed" || /网页未保存/.test(item.notice || "");
+  const page = waits("page") ? "waiting" : busy ? "running" : pageLost ? "failed" : item.status === "succeeded" || waits("video") ? "ok" : null;
+  const video = item.video ? "ok" : waits("video") ? "waiting" : busy ? "running" : /视频未保存/.test(item.notice || "") ? "failed" : null;
+  return [
+    page && { tool: "singlefile", name: "SingleFile", state: page, label: { ok: "网页已保存", running: "正在保存网页", waiting: "网页等你处理", failed: "网页保存失败" }[page] },
+    video && { tool: "yt-dlp", name: "yt-dlp", state: video, label: { ok: "视频已下载", running: "正在尝试下载视频", waiting: "视频等你处理", failed: "视频下载失败" }[video] },
+  ].filter(Boolean);
+}
+
+function ToolMarks({ item }) {
+  const tools = toolStates(item);
+  if (!tools.length) return null;
+  return (
+    <span className="row-tools" role="group" aria-label="存档方式">
+      {tools.map((t) => (
+        <span key={t.tool} className={`row-tool ${t.state}`} role="img" aria-label={`${t.name}：${t.label}`} title={`${t.name}：${t.label}`}>
+          <img src={`vendor-icons/${t.tool}.png`} alt="" />
+        </span>
+      ))}
+    </span>
+  );
+}
+
 function Row({ item, selected, onOpen, query, match, showExcerpt }) {
   const body = cleanBody(item);
   const excerpt = match ? match.excerpt : body.replace(/^Daily Hacker News for \S+\s*/, "").slice(0, 140);
@@ -261,10 +288,9 @@ function Row({ item, selected, onOpen, query, match, showExcerpt }) {
         {showExcerpt && excerpt && !notDone ? <span className="row-excerpt">{hl ? highlight(excerpt, hl) : excerpt}</span> : null}
         <span className="row-meta">
           {notDone ? <StatusPill item={item} /> : null}
+          <ToolMarks item={item} />
           <span className="row-source">{sourceName(item)}</span>
           {item.tags.slice(0, 3).map((t) => <span className="row-tag" key={t}>#{t}</span>)}
-          {item.video ? <Icon name="video" size={13} className="row-video" /> : null}
-          {item.notice ? <Icon name="alert" size={12} className="row-warn" /> : null}
         </span>
       </span>
     </button>

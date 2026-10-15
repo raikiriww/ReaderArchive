@@ -1,7 +1,7 @@
-import { AlertTriangle, Clock, Hand, Loader2, Video } from "lucide-react";
+import { AlertTriangle, Clock, Hand, Loader2 } from "lucide-react";
 import type { MouseEvent } from "react";
 import type { ArchiveTask } from "../../types/domain";
-import { cleanSummary, rowHasWarning, sourceLabelFor, taskTitle } from "../../utils/format";
+import { archiveToolMarks, cleanSummary, sourceLabelFor, taskTitle } from "../../utils/format";
 import { Highlighted } from "../search/Highlighted";
 import type { SearchMatch } from "../search/api";
 
@@ -75,6 +75,26 @@ export function StatusPill({ task }: { task: ArchiveTask }): JSX.Element | null 
   return null;
 }
 
+function ToolMarks({ task }: { task: ArchiveTask }): JSX.Element | null {
+  const marks = archiveToolMarks(task);
+  if (!marks.length) return null;
+  return (
+    <span className="row-tools" role="group" aria-label="存档方式">
+      {marks.map((mark) => (
+        <span
+          key={mark.tool}
+          className={`row-tool ${mark.state}`}
+          role="img"
+          aria-label={`${mark.name}：${mark.label}`}
+          title={`${mark.name}：${mark.label}`}
+        >
+          <img src={`/static/vendor-icons/${mark.tool}.png`} alt="" />
+        </span>
+      ))}
+    </span>
+  );
+}
+
 export interface RowProps {
   task: ArchiveTask;
   selected: boolean;
@@ -87,7 +107,6 @@ export function Row({ task, selected, onOpen, match, now }: RowProps): JSX.Eleme
   const notDone = task.status !== "succeeded";
   const title = taskTitle(task);
   const versions = match?.version_count ?? 0;
-  const hasNotice = rowHasWarning(task);
   const summary = match || notDone ? "" : cleanSummary(task.summary);
   return (
     <button
@@ -128,14 +147,13 @@ export function Row({ task, selected, onOpen, match, now }: RowProps): JSX.Eleme
         ) : null}
         <span className="row-meta">
           {notDone ? <StatusPill task={task} /> : null}
+          <ToolMarks task={task} />
           <span className="row-source">{sourceLabelFor(task)}</span>
           {task.tags.slice(0, 3).map((tag) => (
             <span className="row-tag" key={tag}>
               #{tag}
             </span>
           ))}
-          {task.result?.video_file_name ? <Video size={13} className="row-video" aria-label="含视频" /> : null}
-          {hasNotice && !notDone ? <AlertTriangle size={12} className="row-warn" aria-label="有提醒" /> : null}
         </span>
       </span>
     </button>

@@ -110,6 +110,8 @@ const VIDEO_NOISE = [
   /does not contain (?:a |any )?video/i,
   /no video formats found/i,
   /failed to parse json/i,
+  /page type "[^"]*" is not supported/i, // Substack newsletters
+  /^\[generic\] extracting url:/i, // only the progress line survived; the generic extractor found nothing
   /不支持(?:该|这个)?网址/,
   /没有(?:找到)?视频/,
 ];
@@ -119,9 +121,54 @@ export function isVideoNoise(error: string | null | undefined): boolean {
   return VIDEO_NOISE.some((pattern) => pattern.test(error));
 }
 
-/** Whether a list row should flag a problem: only a page that failed to save counts (video errors are noise). */
-export function rowHasWarning(task: ArchiveTask): boolean {
-  return Boolean(task.result?.page_error);
+export type ArchiveToolState = "ok" | "running" | "waiting" | "failed";
+
+export interface ArchiveToolMark {
+  tool: "singlefile" | "yt-dlp";
+  name: string;
+  state: ArchiveToolState;
+  label: string;
+}
+
+const PAGE_LABELS: Record<ArchiveToolState, string> = {
+  ok: "网页已保存",
+  running: "正在保存网页",
+  waiting: "网页等你处理",
+  failed: "网页保存失败",
+};
+
+const VIDEO_LABELS: Record<ArchiveToolState, string> = {
+  ok: "视频已下载",
+  running: "正在尝试下载视频",
+  waiting: "视频等你处理",
+  failed: "视频下载失败",
+};
+
+/**
+ * The archiving tools a list row shows, and how each one went. SingleFile always shows;
+ * yt-dlp only when it got a video, is still trying, or really failed ("no video" errors are noise).
+ */
+export function archiveToolMarks(task: ArchiveTask): ArchiveToolMark[] {
+  const result = task.result;
+  const busy = task.status === "queued" || task.status === "running";
+  const waits = (target: string) => task.manual_actions.some((action) => action.target === target);
+
+  let page: ArchiveToolState | null = null;
+  if (waits("page")) page = "waiting";
+  else if (busy) page = "running";
+  else if (result?.file_name) page = "ok";
+  else if (result?.page_error || task.status === "failed") page = "failed";
+
+  let video: ArchiveToolState | null = null;
+  if (waits("video")) video = "waiting";
+  else if (busy) video = "running";
+  else if (result?.video_file_name) video = "ok";
+  else if (result?.video_error && !isVideoNoise(result.video_error)) video = "failed";
+
+  const marks: ArchiveToolMark[] = [];
+  if (page) marks.push({ tool: "singlefile", name: "SingleFile", state: page, label: PAGE_LABELS[page] });
+  if (video) marks.push({ tool: "yt-dlp", name: "yt-dlp", state: video, label: VIDEO_LABELS[video] });
+  return marks;
 }
 
 export function taskFileKey(task: ArchiveTask): string {

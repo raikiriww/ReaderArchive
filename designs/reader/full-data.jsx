@@ -1,5 +1,5 @@
 // Prototype data layer: items, feeds, users, config, search simulation, cross-tab persistence.
-const STORE_KEY = "ra-proto-state-v2";
+const STORE_KEY = "ra-proto-state-v3";
 
 function defaultFiles(it) {
   if (it.status !== "succeeded") return [];
@@ -11,7 +11,7 @@ function defaultFiles(it) {
 function buildFullItems() {
   const base = buildItems();
   const notices = {
-    d04: "网页已保存，视频未保存：HTTP Error 403: Forbidden",
+    d09: "网页已保存，视频未保存：HTTP Error 403: Forbidden",
   };
   const list = base.map((it) => ({
     ...it,
@@ -24,6 +24,7 @@ function buildFullItems() {
     { id: "demo-run", url: "https://example.net/video/desk-setup", title: "example.net/video/desk-setup", status: "running", step: "保存网页和下载视频", source: "manual", read: false, at: "2026-10-13T02:24", tags: ["视频"], body: "", video: false, size: 0 },
     { id: "demo-wait", url: "https://example.com/members/article-42", title: "example.com/members/article-42", status: "manual_action_required", tab: "available", action: "page.prepare_manually", source: "manual", read: false, at: "2026-10-13T01:58", tags: [], body: "", video: false, size: 0 },
     { id: "demo-lost", url: "https://example.org/forum/thread/1024", title: "example.org/forum/thread/1024", status: "manual_action_required", tab: "missing", action: "page.login_required", source: "manual", read: false, at: "2026-10-12T23:10", tags: [], body: "", video: false, size: 0 },
+    { id: "demo-vwait", url: "https://example.com/video/members-only", title: "example.com/video/members-only", status: "manual_action_required", tab: "available", action: "video.login_required", notice: "网页已保存，视频需要登录后下载", source: "manual", read: false, at: "2026-10-12T20:05", tags: [], body: "", video: false, size: 0 },
     { id: "demo-fail", url: "https://example.net/private/post/77", title: "example.net/private/post/77", status: "failed", error: "页面需要登录才能查看，SingleFile 保存下来的是登录页。", source: "manual", read: false, at: "2026-10-12T14:41", tags: [], body: "", video: false, size: 0 },
   ];
   return [...demo, ...list].map((it) => ({ renamed: false, feed: null, notice: null, ...it, files: it.files || defaultFiles(it) }));
