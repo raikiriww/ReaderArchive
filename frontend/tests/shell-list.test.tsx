@@ -213,18 +213,20 @@ describe("row", () => {
     expect(html).toContain(">正文内容<");
     expect(html).not.toContain("发布于");
     expect(html).toContain("手动");
-    expect(html).not.toContain("row-warn");
+    expect(html).toContain('aria-label="SingleFile：网页已保存"');
+    expect(html).not.toContain("yt-dlp");
 
     const rss = renderToStaticMarkup(
       <Row
-        task={archiveTask({ source_type: "rss", source_title: "Feed A", result: { ...base.result, page_error: "boom" } })}
+        task={archiveTask({ source_type: "rss", source_title: "Feed A", result: { ...base.result, file_name: null, page_error: "boom" } })}
         selected={false}
         onOpen={noop}
         now={now}
       />,
     );
     expect(rss).toContain("Feed A");
-    expect(rss).toContain("row-warn");
+    expect(rss).toContain("row-tool failed");
+    expect(rss).toContain('aria-label="SingleFile：网页保存失败"');
     expect(rss).not.toContain("row-summary");
   });
 });

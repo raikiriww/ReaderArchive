@@ -1,16 +1,17 @@
 import { describe, expect, test } from "bun:test";
 import {
+  archiveToolMarks,
   cleanSummary,
   formatFileSize,
   hostSourceLabel,
   isVideoNoise,
-  rowHasWarning,
   shortError,
   sourceLabelFor,
   taskTitle,
 } from "../src/utils/format";
 import { cleanTag, validTagFilters } from "../src/utils/tags";
 import { archiveTask } from "./fixtures";
+import type { ArchiveTask } from "../src/types/domain";
 
 describe("archive formatting helpers", () => {
   test("formats task titles from explicit titles, feed entries, and URLs", () => {
@@ -56,17 +57,45 @@ describe("list row helpers", () => {
     expect(cleanSummary(null)).toBe("");
   });
 
-  test("only a failed page flags the row; video errors never do", () => {
+  test("shows SingleFile always and yt-dlp only when it matters", () => {
     const result = archiveTask().result;
-    expect(rowHasWarning(archiveTask({ result: { ...result, video_error: "HTTP Error 403" } }))).toBe(false);
-    expect(rowHasWarning(archiveTask({ result: { ...result, video_error: "[Weibo] 1: No video formats found!" } }))).toBe(
-      false,
+    const marks = (overrides: Partial<ArchiveTask>) =>
+      archiveToolMarks(archiveTask(overrides)).map((mark) => `${mark.tool}:${mark.state}`);
+    const action = (target: string) =>
+      ({ code: "c1", kind: `${target}.login_required`, target, message: "", resume: "retry_page" }) as unknown as ArchiveTask["manual_actions"][number];
+
+    expect(marks({})).toEqual(["singlefile:ok"]);
+    expect(marks({ result: { ...result, video_error: "[Weibo] 1: No video formats found!" } })).toEqual(["singlefile:ok"]);
+    expect(marks({ result: { ...result, video_error: "HTTP Error 403: Forbidden" } })).toEqual([
+      "singlefile:ok",
+      "yt-dlp:failed",
+    ]);
+    expect(marks({ result: { ...result, video_file_name: "v.mp4" } })).toEqual(["singlefile:ok", "yt-dlp:ok"]);
+    expect(marks({ result: { ...result, file_name: null, video_file_name: "v.mp4", page_error: "crash" } })).toEqual([
+      "singlefile:failed",
+      "yt-dlp:ok",
+    ]);
+    expect(marks({ status: "queued", result: null })).toEqual(["singlefile:running", "yt-dlp:running"]);
+    expect(marks({ status: "manual_action_required", manual_actions: [action("page")], result: null })).toEqual([
+      "singlefile:waiting",
+    ]);
+    expect(marks({ status: "manual_action_required", manual_actions: [action("video")] })).toEqual([
+      "singlefile:ok",
+      "yt-dlp:waiting",
+    ]);
+    expect(marks({ status: "failed", result: null })).toEqual(["singlefile:failed"]);
+    expect(archiveToolMarks(archiveTask({ result: { ...result, video_error: "HTTP Error 403" } }))[1].label).toBe(
+      "视频下载失败",
     );
-    expect(rowHasWarning(archiveTask({ result: { ...result, page_error: "crash" } }))).toBe(true);
-    expect(rowHasWarning(archiveTask({ result: null }))).toBe(false);
   });
 
   test("recognizes yt-dlp no-video noise", () => {
+    expect(isVideoNoise('[Substack] some-post: Page type "newsletter" is not supported; please report this issue')).toBe(
+      true,
+    );
+    expect(isVideoNoise("[generic] Extracting URL: https://example.com/weekly/issue-1.html")).toBe(true);
+    expect(isVideoNoise("[generic] Unable to download webpage: HTTP Error 404: Not Found")).toBe(false);
+    expect(isVideoNoise("Postprocessing: Error opening input files: Invalid data found when processing input")).toBe(false);
     expect(isVideoNoise("ERROR: [Weibo] 5: No video formats found!; please report this issue on https://x")).toBe(true);
     expect(isVideoNoise("ERROR: Failed to parse JSON (caused by JSONDecodeError)")).toBe(true);
     expect(isVideoNoise("Unsupported URL: https://example.com")).toBe(true);
