@@ -109,7 +109,6 @@ const VIDEO_NOISE = [
   /no suitable (?:extractor|formats?)/i,
   /does not contain (?:a |any )?video/i,
   /no video formats found/i,
-  /failed to parse json/i,
   /page type "[^"]*" is not supported/i, // Substack newsletters
   /^\[generic\] extracting url:/i, // only the progress line survived; the generic extractor found nothing
   /不支持(?:该|这个)?网址/,
