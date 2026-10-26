@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from app.model_runtime import serialized_model_load
+from app.model_runtime import release_unused_memory, serialized_model_load
 
 if TYPE_CHECKING:
     from app.core.config import Settings
@@ -151,6 +151,7 @@ class QwenEmbeddingProvider:
         model = AutoModel.from_pretrained(directory, local_files_only=True,
             torch_dtype=torch.float32, attn_implementation='sdpa').eval().to('cpu')
         self._tokenizer, self._model = tokenizer, model
+        release_unused_memory()
         return model
 
     def prepare_embedding_chunks(self, title: str, text: str) -> tuple[list[str], list[str]]:

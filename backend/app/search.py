@@ -249,6 +249,9 @@ def _rerank_candidates(service: ArchiveTaskService, query: str,
                 cache.move_to_end(cache_key)
                 return
     if not provider.available:
+        request_load = getattr(provider, 'request_load', None)
+        if request_load is not None:
+            request_load()
         return
     original = [(item, item['rank'], item.get('evidence')) for item in candidates]
     settings = service.archiver.settings

@@ -78,10 +78,13 @@ RUN apt-get update \
 
 COPY backend/pyproject.toml backend/uv.lock ./
 
-RUN env -u VIRTUAL_ENV uv sync --locked --no-dev --no-install-project
+# The base image sets HOME=/config, a declared volume. Keep the uv cache in a
+# build cache mount so it reaches neither an image layer nor new volumes.
+RUN --mount=type=cache,target=/root/.cache/uv \
+  env -u VIRTUAL_ENV UV_CACHE_DIR=/root/.cache/uv uv sync --locked --no-dev --no-install-project
 
 RUN --mount=type=cache,target=/root/.cache/reader-fastembed \
-  /app/backend/.venv/bin/python - <<'PY'
+  HF_HOME=/root/.cache/reader-fastembed/hf /app/backend/.venv/bin/python - <<'PY'
 from pathlib import Path
 from shutil import copytree, rmtree
 
@@ -102,7 +105,7 @@ PY
 # Ship the CPU ranking model in the image: upgrades do not require a new
 # compose setting or a network download on the first user search.
 RUN --mount=type=cache,target=/root/.cache/reader-reranker \
-  /app/backend/.venv/bin/python - <<'PY'
+  HF_HOME=/root/.cache/reader-reranker/hf /app/backend/.venv/bin/python - <<'PY'
 from pathlib import Path
 from shutil import copytree
 import json
@@ -127,7 +130,7 @@ PY
 # Keep both embedding models available offline so users who explicitly retain
 # MiniLM can upgrade the same image without changing their compose settings.
 RUN --mount=type=cache,target=/root/.cache/reader-qwen \
-  /app/backend/.venv/bin/python - <<'PY'
+  HF_HOME=/root/.cache/reader-qwen/hf /app/backend/.venv/bin/python - <<'PY'
 from shutil import copytree
 from pathlib import Path
 import json
@@ -153,7 +156,9 @@ COPY backend/scripts ./scripts
 COPY backend/alembic.ini ./alembic.ini
 COPY backend/migrations ./migrations
 COPY scripts /app/scripts
-COPY --from=frontend-build /frontend /app/frontend
+# The backend serves only the built pages. Docker verification copies the
+# frontend sources in and installs their dependencies when it needs them.
+COPY --from=frontend-build /frontend/dist /app/frontend/dist
 COPY docker/custom-services.d/reader-api /custom-services.d/reader-api
 COPY docker/wrapped-chrome /usr/bin/wrapped-chrome
 

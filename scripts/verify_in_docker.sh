@@ -99,6 +99,13 @@ docker_compose exec -T "$SERVICE" \
       READER_SEMANTIC_SEARCH_ENABLED=false \
   bash -lc "cd /app/backend && /app/backend/.venv/bin/python -m pytest"
 
+echo "==> Copying frontend sources into the running container"
+# The image ships only frontend/dist; checks need the sources and dev tools.
+tar -C frontend --exclude=./node_modules --exclude=./dist -cf - . \
+  | docker_compose exec -T "$SERVICE" tar -C /app/frontend -xf -
+docker_compose exec -T "$SERVICE" \
+  bash -lc "cd /app/frontend && bun install --frozen-lockfile"
+
 echo "==> Generating frontend client inside Docker"
 docker_compose exec -T "$SERVICE" \
   bash -lc "cd /app/frontend && bun run generate-client"

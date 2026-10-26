@@ -22,6 +22,7 @@ from app.archiver import (
     YtDlpDownloader,
 )
 from app.crud import ArchiveTaskRepository
+from app.model_runtime import release_unused_memory
 from app.models import (
     ArchiveSearchRead,
     ArchiveSearchTextRead,
@@ -787,16 +788,26 @@ class ArchiveTaskService:
                 self.text_queue.task_done()
 
     async def _run_reranking_worker(self) -> None:
-        if not self.reranking_provider.enabled:
+        provider = self.reranking_provider
+        if not provider.enabled:
             return
+        retry_seconds = max(1, self.archiver.settings.semantic_retry_interval_seconds)
+        idle_unload_seconds = self.archiver.settings.search_rerank_idle_unload_seconds
         while True:
-            try:
-                await asyncio.to_thread(self.reranking_provider.preload)
-                self.reranking_last_error = None
-            except Exception as exc:
-                self.reranking_last_error = self._short_error(str(exc))
-                logger.warning("Search refinement unavailable; retrieval remains available: %s", exc)
-            await asyncio.sleep(max(1, self.archiver.settings.semantic_retry_interval_seconds))
+            if idle_unload_seconds <= 0 or provider.load_requested:
+                try:
+                    await asyncio.to_thread(provider.preload)
+                    self.reranking_last_error = None
+                except Exception as exc:
+                    self.reranking_last_error = self._short_error(str(exc))
+                    logger.warning("Search refinement unavailable; retrieval remains available: %s", exc)
+                    await asyncio.sleep(retry_seconds)
+                    continue
+            elif await asyncio.to_thread(provider.unload_if_idle, idle_unload_seconds):
+                logger.info("Search refinement model unloaded after %s idle seconds.", idle_unload_seconds)
+            # With idle unload on, poll often so a search's reload request is
+            # picked up quickly; otherwise keep the original retry cadence.
+            await asyncio.sleep(1 if idle_unload_seconds > 0 else retry_seconds)
 
     async def _run_semantic_worker(self) -> None:
         if self.embedding_provider is not None and self.archiver.settings.semantic_search_enabled:
@@ -829,6 +840,9 @@ class ArchiveTaskService:
                 continue
             try:
                 await asyncio.to_thread(self._index_task_semantics, task_id)
+                if self.semantic_queue.empty():
+                    # Batch activations are freed but kept by the allocator.
+                    await asyncio.to_thread(release_unused_memory)
             except Exception as exc:
                 self.semantic_last_error = self._short_error(str(exc))
                 logger.exception("Semantic indexing failed for task %s.", task_id)

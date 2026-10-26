@@ -91,8 +91,8 @@ def runtime(monkeypatch):
     quantized_backend = SimpleNamespace(supported_engines=["x86"], engine="none")
     linear_class = type("Linear", (), {})
 
-    def quantize(model, modules, dtype):
-        quantizations.append((model, modules, dtype, quantized_backend.engine))
+    def quantize(model, modules, dtype, inplace=False):
+        quantizations.append((model, modules, dtype, quantized_backend.engine, inplace))
         return model
 
     def tokenizer_load(name, **kwargs):
@@ -373,7 +373,7 @@ def test_quantization_selection_is_explicit_cpu_only_and_reported(tmp_path, runt
     assert provider.metadata["device"] == runtime.model.device == "cpu"
     assert len(runtime.quantizations) == (1 if effective == "int8" else 0)
     if effective == "int8":
-        assert runtime.quantizations[0] == (runtime.model, {runtime.linear_class}, "qint8", "x86")
+        assert runtime.quantizations[0] == (runtime.model, {runtime.linear_class}, "qint8", "x86", True)
         assert provider.quantization_engine == "x86"
     provider.preload()
     assert len(runtime.quantizations) == (1 if effective == "int8" else 0)
@@ -411,3 +411,62 @@ def test_auto_uses_fp32_when_x86_quantization_engine_is_unavailable(tmp_path, ru
     assert provider.quantization_engine is None
     assert not runtime.quantizations
     assert provider.score("q", ["1"]) == [1]
+
+
+def test_idle_unload_frees_the_model_and_a_requested_reload_keeps_scores(tmp_path, runtime, monkeypatch):
+    clock = [100.0]
+    monkeypatch.setattr("app.reranking.time.monotonic", lambda: clock[0])
+    trims = []
+    monkeypatch.setattr("app.reranking.release_unused_memory", lambda: trims.append(True))
+    provider = LocalRerankerProvider(cache_dir=tmp_path)
+    provider.request_load()
+    assert provider.load_requested
+    provider.preload()
+    assert provider.ready and not provider.load_requested
+    # A loaded model ignores reload requests.
+    provider.request_load()
+    assert not provider.load_requested
+    clock[0] += 50
+    assert provider.score("q", ["1", "2"]) == [1, 2]
+    clock[0] += 299
+    assert not provider.unload_if_idle(300)
+    assert provider.ready
+    clock[0] += 1
+    trims.clear()
+    assert provider.unload_if_idle(300)
+    assert not provider.ready and not provider.available and trims == [True]
+    assert not provider.unload_if_idle(300)
+    with pytest.raises(RerankerUnavailableError, match="preparing"):
+        provider.score("q", ["1"])
+    provider.request_load()
+    assert provider.load_requested
+    provider.preload()
+    assert provider.ready and not provider.load_requested
+    calls = runtime.model.calls
+    assert provider.score("q", ["1", "2"]) == [1, 2]
+    assert runtime.model.calls == calls
+    assert [kind for kind, _, _ in runtime.loads].count("model") == 2
+
+
+def test_idle_unload_skips_a_busy_model_and_disabled_providers_ignore_requests(tmp_path, runtime, monkeypatch):
+    clock = [100.0]
+    monkeypatch.setattr("app.reranking.time.monotonic", lambda: clock[0])
+    provider = LocalRerankerProvider(cache_dir=tmp_path)
+    provider.preload()
+    clock[0] += 1000
+    provider._lock.acquire()
+    try:
+        assert not provider.unload_if_idle(1)
+    finally:
+        provider._lock.release()
+    assert provider.ready
+    disabled = LocalRerankerProvider(cache_dir=tmp_path, enabled=False)
+    disabled.request_load()
+    assert not disabled.load_requested
+
+
+def test_preload_returns_freed_load_memory(tmp_path, runtime, monkeypatch):
+    trims = []
+    monkeypatch.setattr("app.reranking.release_unused_memory", lambda: trims.append(True))
+    LocalRerankerProvider(cache_dir=tmp_path).preload()
+    assert trims == [True]
