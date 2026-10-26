@@ -65,6 +65,10 @@ class Settings(BaseSettings):
     search_rerank_batch_size: int = 2
     search_rerank_max_length: int = 512
     search_rerank_evidence_articles: int = 5
+    # 0 keeps the reranker loaded. A positive value frees it (about 2 GB) after
+    # that many idle seconds; the next search reloads it in the background and
+    # is ranked without it until the reload finishes.
+    search_rerank_idle_unload_seconds: float = Field(default=0, ge=0)
 
     @model_validator(mode="after")
     def search_model_defaults(self) -> "Settings":

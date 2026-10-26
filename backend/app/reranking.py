@@ -1,7 +1,8 @@
 """A bounded, CPU-only cross-encoder with explicit readiness and failure states.
 
 Importing this module does not import torch or transformers. Call ``preload`` in a
-background worker before using ``score`` on a request thread. Scores are raw
+background worker before using ``score`` on a request thread. A worker may also
+``unload_if_idle`` to free the model, and reload it after ``request_load``. Scores are raw
 single-label logits; callers must not interpret them as calibrated probabilities.
 """
 from __future__ import annotations
@@ -17,7 +18,7 @@ from collections import OrderedDict
 from pathlib import Path
 from typing import Any
 
-from app.model_runtime import serialized_model_load
+from app.model_runtime import release_unused_memory, serialized_model_load
 
 
 class RerankerError(RuntimeError):
@@ -101,6 +102,8 @@ class LocalRerankerProvider:
         self._scores: OrderedDict[tuple[str, str | None, int, str, str], float] = OrderedDict()
         self._last_error: str | None = None
         self._failed_at: float | None = None
+        self._last_used = time.monotonic()
+        self._load_requested = False
 
     @property
     def ready(self) -> bool:
@@ -113,6 +116,14 @@ class LocalRerankerProvider:
     @property
     def last_error(self) -> str | None:
         return self._last_error
+
+    @property
+    def load_requested(self) -> bool:
+        return self._load_requested
+
+    @property
+    def idle_seconds(self) -> float:
+        return time.monotonic() - self._last_used
 
     @property
     def error(self) -> str | None:
@@ -156,6 +167,8 @@ class LocalRerankerProvider:
             self._check_enabled()
             if not self.ready:
                 self._load_model()
+                self._last_used = time.monotonic()
+            self._load_requested = False
             self._last_error = None
             self._failed_at = None
         except RerankerUnavailableError:
@@ -168,6 +181,27 @@ class LocalRerankerProvider:
             raise RerankerUnavailableError(f"CPU reranker could not be loaded: {exc}") from exc
         finally:
             self._lock.release()
+
+    def request_load(self) -> None:
+        """Ask the background worker to reload an unloaded model; never loads here."""
+        if self.enabled and not self.ready:
+            self._load_requested = True
+
+    def unload_if_idle(self, idle_seconds: float) -> bool:
+        """Drop the model once unused for ``idle_seconds``; skip while it is busy."""
+        if not self.ready or self.idle_seconds < idle_seconds:
+            return False
+        if not self._lock.acquire(blocking=False):
+            return False
+        try:
+            if not self.ready or self.idle_seconds < idle_seconds:
+                return False
+            # Scores stay cached: a reload yields the same model and settings.
+            self._model = self._tokenizer = self._torch = self._budget_tokenizer = None
+        finally:
+            self._lock.release()
+        release_unused_memory()
+        return True
 
     @serialized_model_load
     def _load_model(self) -> None:
@@ -215,7 +249,10 @@ class LocalRerankerProvider:
         model.to("cpu")
         model.eval()
         if use_int8:
-            model = torch.ao.quantization.quantize_dynamic(model, {torch.nn.Linear}, dtype=torch.qint8)
+            # In place, so the fp32 Linear weights are replaced one at a time
+            # instead of holding a full fp32 copy beside the int8 model.
+            model = torch.ao.quantization.quantize_dynamic(
+                model, {torch.nn.Linear}, dtype=torch.qint8, inplace=True)
             model.to("cpu")
             model.eval()
         budget_tokenizer = None
@@ -230,6 +267,7 @@ class LocalRerankerProvider:
         self._budget_tokenizer = budget_tokenizer
         self.effective_quantization = "int8" if use_int8 else "none"
         self.quantization_engine = "x86" if use_int8 else None
+        release_unused_memory()
 
     def _pair_size(self, query: str, passage: str) -> int:
         if self._budget_tokenizer is not None:
@@ -296,6 +334,7 @@ class LocalRerankerProvider:
             self._check_enabled()
             if not self.ready:
                 raise RerankerUnavailableError("CPU reranker is preparing; reranking was not performed.")
+            self._last_used = time.monotonic()
             keys = [self._cache_key(query, passage) for passage in passages]
             resolved: dict[tuple[str, str | None, int, str, str], float] = {}
             missing: dict[tuple[str, str | None, int, str, str], str] = {}
