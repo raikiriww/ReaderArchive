@@ -1,6 +1,6 @@
 [project]
 name = "reader-archive-api"
-version = "0.5.5"
+version = "0.5.6"
 description = "FastAPI service for scheduling SingleFile archive jobs."
 requires-python = ">=3.12"
 license = "Apache-2.0"
