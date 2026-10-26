@@ -496,6 +496,9 @@ class SingleFileArchiver:
 
 
 class YtDlpDownloader:
+    transient_retry_attempts = 1
+    transient_retry_delay_seconds = 5.0
+
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
 
@@ -530,24 +533,26 @@ class YtDlpDownloader:
             str(output_template),
             url,
         ]
-        process = await asyncio.create_subprocess_exec(
-            *command,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            start_new_session=True,
-        )
-        try:
-            stdout, stderr = await asyncio.wait_for(
-                process.communicate(),
-                timeout=self.settings.video_download_timeout_seconds,
+        for attempt in range(self.transient_retry_attempts + 1):
+            process = await asyncio.create_subprocess_exec(
+                *command,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                start_new_session=True,
             )
-        except TimeoutError as exc:
-            await self._stop_process_tree(process)
-            self._remove_created_files(archive_dir, output_stem, existing_files)
-            msg = "Video download timed out."
-            raise RuntimeError(msg) from exc
+            try:
+                stdout, stderr = await asyncio.wait_for(
+                    process.communicate(),
+                    timeout=self.settings.video_download_timeout_seconds,
+                )
+            except TimeoutError as exc:
+                await self._stop_process_tree(process)
+                self._remove_created_files(archive_dir, output_stem, existing_files)
+                msg = "Video download timed out."
+                raise RuntimeError(msg) from exc
 
-        if process.returncode != 0:
+            if process.returncode == 0:
+                break
             self._remove_created_files(archive_dir, output_stem, existing_files)
             output = "\n".join(
                 text
@@ -560,6 +565,10 @@ class YtDlpDownloader:
             msg = output[-1000:] if output else "yt-dlp failed."
             if self._is_browser_login_error(msg):
                 raise BrowserLoginRequiredError(self._browser_login_message(msg))
+            if attempt < self.transient_retry_attempts and self._is_transient_error(msg):
+                # Sites like Weibo sometimes answer with a non-JSON page for a moment.
+                await asyncio.sleep(self.transient_retry_delay_seconds)
+                continue
             raise RuntimeError(msg)
 
         created_files = [
@@ -623,6 +632,9 @@ class YtDlpDownloader:
                 "status code 412",
             )
         )
+
+    def _is_transient_error(self, output: str) -> bool:
+        return "failed to parse json" in output.lower()
 
     def _browser_login_message(self, output: str) -> str:
         lines = [" ".join(line.split()) for line in output.splitlines() if line.strip()]

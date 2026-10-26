@@ -27,7 +27,7 @@ services:
       context: .
       args:
         SINGLE_FILE_CLI_VERSION: ${SINGLE_FILE_CLI_VERSION:-2.6.1}
-        YT_DLP_VERSION: ${YT_DLP_VERSION:-2026.06.09}
+        YT_DLP_VERSION: ${YT_DLP_VERSION:-2026.08.19}
     image: reader/archive-desktop:semantic-eval
     platform: linux/amd64
     container_name: reader-eval-archive-desktop

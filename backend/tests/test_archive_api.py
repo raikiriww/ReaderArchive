@@ -309,6 +309,84 @@ def test_http_416_is_download_failure_not_browser_login(
     assert not isinstance(exc_info.value, BrowserLoginRequiredError)
 
 
+@pytest.fixture
+def fake_flaky_json_yt_dlp(tmp_path: Path) -> Path:
+    script = tmp_path / "yt-dlp-flaky-json"
+    script.write_text(
+        f"""#!/usr/bin/env python3
+import pathlib
+import sys
+
+marker = pathlib.Path({str(tmp_path / "yt-dlp-flaky-json.attempted")!r})
+output = pathlib.Path(sys.argv[sys.argv.index("--output") + 1].replace("%(playlist_index&.{{}}|)s", ""))
+if not marker.exists():
+    marker.write_text("1", encoding="utf-8")
+    output.with_suffix(".info.json").write_text("{{}}", encoding="utf-8")
+    print(
+        "ERROR: [Weibo] 1234567890: Failed to parse JSON "
+        "(caused by JSONDecodeError('Expecting value in '': line 2 column 3 (char 3)'))",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+output.with_suffix(".mp4").write_bytes(b"video")
+""",
+        encoding="utf-8",
+    )
+    script.chmod(0o755)
+    return script
+
+
+def test_transient_json_error_retries_once(
+    tmp_path: Path,
+    fake_flaky_json_yt_dlp: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(YtDlpDownloader, "transient_retry_delay_seconds", 0)
+    settings = Settings(
+        archive_dir=tmp_path / "archive",
+        browser_profile_dir=tmp_path / "profile",
+        yt_dlp_path=str(fake_flaky_json_yt_dlp),
+        use_xvfb=False,
+    )
+
+    files = asyncio.run(YtDlpDownloader(settings).download("https://example.com/video", "task"))
+
+    assert files == ["task.mp4"]
+
+
+def test_repeated_json_error_fails_after_one_retry(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(YtDlpDownloader, "transient_retry_delay_seconds", 0)
+    attempts = tmp_path / "attempts"
+    script = tmp_path / "yt-dlp-bad-json"
+    script.write_text(
+        f"""#!/usr/bin/env python3
+import pathlib
+import sys
+
+attempts = pathlib.Path({str(attempts)!r})
+attempts.write_text(attempts.read_text() + "x" if attempts.exists() else "x")
+print("ERROR: [Weibo] 1234567890: Failed to parse JSON", file=sys.stderr)
+sys.exit(1)
+""",
+        encoding="utf-8",
+    )
+    script.chmod(0o755)
+    settings = Settings(
+        archive_dir=tmp_path / "archive",
+        browser_profile_dir=tmp_path / "profile",
+        yt_dlp_path=str(script),
+        use_xvfb=False,
+    )
+
+    with pytest.raises(RuntimeError, match="Failed to parse JSON"):
+        asyncio.run(YtDlpDownloader(settings).download("https://example.com/video", "task"))
+
+    assert attempts.read_text() == "xx"
+
+
 def test_only_authentication_http_errors_require_browser_login() -> None:
     downloader = YtDlpDownloader(Settings())
 

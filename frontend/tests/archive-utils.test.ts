@@ -97,7 +97,7 @@ describe("list row helpers", () => {
     expect(isVideoNoise("[generic] Unable to download webpage: HTTP Error 404: Not Found")).toBe(false);
     expect(isVideoNoise("Postprocessing: Error opening input files: Invalid data found when processing input")).toBe(false);
     expect(isVideoNoise("ERROR: [Weibo] 5: No video formats found!; please report this issue on https://x")).toBe(true);
-    expect(isVideoNoise("ERROR: Failed to parse JSON (caused by JSONDecodeError)")).toBe(true);
+    expect(isVideoNoise("ERROR: Failed to parse JSON (caused by JSONDecodeError)")).toBe(false);
     expect(isVideoNoise("Unsupported URL: https://example.com")).toBe(true);
     expect(isVideoNoise("HTTP Error 403: Forbidden")).toBe(false);
   });

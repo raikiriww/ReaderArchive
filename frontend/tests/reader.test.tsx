@@ -410,14 +410,19 @@ describe("details drawer", () => {
     expect(html).not.toContain("Unsupported URL");
   });
 
-  test("treats Weibo no-format and JSON parse failures as quiet noise", () => {
-    for (const video_error of [
-      "ERROR: [Weibo] 5012345: No video formats found!; please report this issue on https://github.com/yt-dlp/yt-dlp/issues",
-      "ERROR: [Weibo] 5012345: Failed to parse JSON (caused by JSONDecodeError('Expecting value'))",
-    ]) {
-      const task = archiveTask({ result: { ...archiveTask().result, video_error } });
-      expect(drawerNotices(task)).toEqual([{ kind: "quiet", text: "此网址不含视频" }]);
-    }
+  test("treats Weibo no-format errors as quiet noise", () => {
+    const video_error =
+      "ERROR: [Weibo] 5012345: No video formats found!; please report this issue on https://github.com/yt-dlp/yt-dlp/issues";
+    const task = archiveTask({ result: { ...archiveTask().result, video_error } });
+    expect(drawerNotices(task)).toEqual([{ kind: "quiet", text: "此网址不含视频" }]);
+  });
+
+  test("shows Weibo JSON parse failures as real video errors", () => {
+    const video_error = "ERROR: [Weibo] 5012345: Failed to parse JSON (caused by JSONDecodeError('Expecting value'))";
+    const task = archiveTask({ result: { ...archiveTask().result, video_error } });
+    const [notice] = drawerNotices(task);
+    expect(notice.kind).toBe("warning");
+    expect(notice.text).toContain("Failed to parse JSON");
   });
 
   test("shortens long real video errors", () => {
