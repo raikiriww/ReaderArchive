@@ -5,6 +5,7 @@ import math
 import threading
 from types import SimpleNamespace
 
+import numpy as np
 import pytest
 
 from app.core.config import Settings
@@ -27,19 +28,18 @@ class CharacterTokenizer:
     def decode(self, values):
         return ''.join(chr(value) for value in values)
 
-    def __call__(self, values, **kwargs):
-        import torch
-        self.calls.append((values, kwargs))
+    def pad_batch(self, values):
+        self.calls.append(values)
         size = max(map(len, values))
-        ids = torch.tensor([[0]*(size-len(value))+self.encode(value) for value in values])
-        return {'input_ids': ids, 'attention_mask': (ids != 0).long()}
+        ids = np.array([[0]*(size-len(value))+self.encode(value) for value in values], dtype=np.int64)
+        return ids, (ids != 0).astype(np.int64)
 
 
 class FakeModel:
-    def __call__(self, input_ids, attention_mask):
-        import torch
-        axes = torch.arange(1, 1025, dtype=torch.float32)
-        return SimpleNamespace(last_hidden_state=axes[None, None, :] + input_ids[:, :, None])
+    def run(self, outputs, feeds):
+        assert outputs == ['last_hidden_state']
+        axes = np.arange(1, 1025, dtype=np.float32)
+        return [axes[None, None, :] + feeds['input_ids'][:, :, None]]
 
 
 def provider():
@@ -79,11 +79,11 @@ def test_overlong_sentence_splits_without_dropping_tail():
 def test_query_instruction_and_cache_are_separate_from_document_inputs():
     item = provider()
     first = item.embed_query('缓存请求收费吗')
-    assert item._tokenizer.calls[0][0] == [f'Instruct: {QUERY_INSTRUCTION}\nQuery:缓存请求收费吗']
+    assert item._tokenizer.calls[0] == [f'Instruct: {QUERY_INSTRUCTION}\nQuery:缓存请求收费吗']
     assert item.embed_query('缓存请求收费吗') == first
     assert len(item._tokenizer.calls) == 1
     item.embed(['正文'])
-    assert item._tokenizer.calls[1][0] == ['正文']
+    assert item._tokenizer.calls[1] == ['正文']
 
 
 def test_last_token_pooling_projection_and_normalization():
@@ -93,13 +93,12 @@ def test_last_token_pooling_projection_and_normalization():
     assert vectors[0] == pytest.approx(vectors[1])
     assert math.sqrt(sum(value*value for value in vectors[0])) == pytest.approx(1)
     assert vectors[0][-1]/vectors[0][0] == pytest.approx((384+ord('a'))/(1+ord('a')))
-    assert item._tokenizer.calls[0][1]['truncation'] is False
 
 
 def test_index_batches_are_bounded_even_when_caller_requests_many():
     item = provider()
     assert len(item.embed(['body']*11)) == 11
-    assert [len(call[0]) for call in item._tokenizer.calls] == [4, 4, 3]
+    assert [len(call) for call in item._tokenizer.calls] == [4, 4, 3]
 
 
 def test_oversized_inputs_are_rejected_instead_of_silently_truncated():
@@ -173,7 +172,7 @@ def test_standalone_model_identity_mismatch_rejected_before_runtime_import(tmp_p
     original_import = builtins.__import__
 
     def guarded_import(name, *args, **kwargs):
-        assert name not in {'torch', 'transformers'}, 'Identity must be checked before loading the runtime.'
+        assert name not in {'onnxruntime', 'tokenizers'}, 'Identity must be checked before loading the runtime.'
         return original_import(name, *args, **kwargs)
 
     monkeypatch.setattr(builtins, '__import__', guarded_import)
@@ -189,3 +188,31 @@ def test_matching_standalone_model_identity_resolves(tmp_path):
     item = QwenEmbeddingProvider(Settings(_env_file=None, semantic_search_enabled=True, semantic_model_name=MODEL_NAME,
         semantic_model_dir=tmp_path))
     assert item._resolve_model_path() == tmp_path
+
+
+def test_missing_onnx_model_fails_before_loading_the_runtime(tmp_path):
+    (tmp_path/'config.json').write_text('{}')
+    item = QwenEmbeddingProvider(Settings(_env_file=None, semantic_search_enabled=True, semantic_model_name=MODEL_NAME,
+        semantic_model_dir=tmp_path))
+    with pytest.raises(RuntimeError, match='ONNX model is missing'):
+        item.preload()
+    assert item._model is None and not item.available
+
+
+def test_tokenizer_left_pads_with_the_end_of_text_token():
+    from app.qwen_embedding import QwenTokenizer
+
+    class Backend:
+        def no_padding(self): pass
+        def no_truncation(self): pass
+        def token_to_id(self, token): return 9 if token == '<|endoftext|>' else None
+        def encode(self, text, add_special_tokens=True):
+            return SimpleNamespace(ids=[ord(char) for char in text] + ([9] if add_special_tokens else []))
+        def decode(self, ids, skip_special_tokens=False): return ''.join(chr(value) for value in ids)
+
+    tokenizer = QwenTokenizer(Backend())
+    assert tokenizer.encode('ab', add_special_tokens=False) == [97, 98]
+    ids, mask = tokenizer.pad_batch(['a', 'abc'])
+    assert ids.tolist() == [[9, 9, 97, 9], [97, 98, 99, 9]]
+    assert mask.tolist() == [[0, 0, 1, 1], [1, 1, 1, 1]]
+    assert ids.dtype == mask.dtype == np.int64

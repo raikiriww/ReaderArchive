@@ -3,9 +3,9 @@ from __future__ import annotations
 import json
 import threading
 import time
-from contextlib import nullcontext
 from types import SimpleNamespace
 
+import numpy as np
 import pytest
 
 from app.reranking import (
@@ -16,105 +16,73 @@ from app.reranking import (
     RerankerUnavailableError,
 )
 
-
-class FakeTensor:
-    def __init__(self, values, shape=None):
-        self.values = values
-        self.shape = shape or (len(values), 1)
-        self.devices = []
-
-    def to(self, device):
-        self.devices.append(device)
-        return self
-
-    def detach(self):
-        return self
-
-    def float(self):
-        return self
-
-    def cpu(self):
-        return self
-
-    def reshape(self, _):
-        return self
-
-    def tolist(self):
-        return self.values
+QUERY_END, PASSAGE_END, PAD = 2, 3, 0
 
 
 class FakeTokenizer:
+    """Pair ids are [1, query..., 2, passage..., 3], so the session can read passages back."""
+
     def __init__(self):
         self.calls = []
-        self.tensors = []
 
-    def encode(self, query, passage, **options):
-        assert options == {"add_special_tokens": True, "truncation": False}
-        return [0] * (len(query) + len(passage) + 4)
+    def no_truncation(self):
+        pass
 
-    def __call__(self, pairs, **options):
-        self.calls.append((pairs, options))
-        tensor = FakeTensor([float(passage) for _, passage in pairs])
-        self.tensors.append(tensor)
-        return {"input_ids": tensor}
+    def no_padding(self):
+        pass
+
+    def token_to_id(self, token):
+        return PAD if token == "<pad>" else None
+
+    def encode(self, query, passage, add_special_tokens=True):
+        assert add_special_tokens is True
+        self.calls.append((query, passage))
+        return SimpleNamespace(ids=[1, *map(ord, query), QUERY_END, *map(ord, passage), PASSAGE_END])
 
 
-class FakeModel:
+class FakeSession:
     def __init__(self):
-        self.device = None
-        self.evaluating = False
         self.calls = 0
+        self.feeds = []
         self.override = None
 
-    def to(self, device):
-        self.device = device
-        return self
-
-    def eval(self):
-        self.evaluating = True
-        return self
-
-    def __call__(self, **inputs):
+    def run(self, outputs, feeds):
+        assert outputs == ["logits"]
         self.calls += 1
+        self.feeds.append(feeds)
         if isinstance(self.override, Exception):
             raise self.override
-        return SimpleNamespace(logits=self.override or inputs["input_ids"])
+        if self.override is not None:
+            return [self.override]
+        scores = []
+        for ids, mask in zip(feeds["input_ids"], feeds["attention_mask"], strict=True):
+            row = [int(value) for value, keep in zip(ids, mask, strict=True) if keep]
+            passage = row[row.index(QUERY_END) + 1:row.index(PASSAGE_END)]
+            scores.append([float("".join(map(chr, passage)))])
+        return [np.array(scores, dtype=np.float32)]
 
 
 @pytest.fixture
-def runtime(monkeypatch):
+def runtime(monkeypatch, tmp_path):
     import sys
 
-    monkeypatch.setattr("app.reranking.platform.machine", lambda: "aarch64")
-    tokenizer, model = FakeTokenizer(), FakeModel()
-    loads, thread_counts, quantizations = [], [], []
-    quantized_backend = SimpleNamespace(supported_engines=["x86"], engine="none")
-    linear_class = type("Linear", (), {})
+    (tmp_path / "model.onnx").write_bytes(b"onnx")
+    (tmp_path / "tokenizer.json").write_text("{}")
+    tokenizer, model = FakeTokenizer(), FakeSession()
+    loads, threads = [], []
 
-    def quantize(model, modules, dtype, inplace=False):
-        quantizations.append((model, modules, dtype, quantized_backend.engine, inplace))
-        return model
-
-    def tokenizer_load(name, **kwargs):
-        loads.append(("tokenizer", name, kwargs))
+    def tokenizer_load(path):
+        loads.append(("tokenizer", path))
         return tokenizer
 
-    def model_load(name, **kwargs):
-        loads.append(("model", name, kwargs))
+    def session(path, num_threads):
+        loads.append(("model", str(path)))
+        threads.append(num_threads)
         return model
 
-    monkeypatch.setitem(sys.modules, "torch", SimpleNamespace(
-        float32="float32", set_num_threads=thread_counts.append, inference_mode=nullcontext,
-        qint8="qint8", backends=SimpleNamespace(quantized=quantized_backend),
-        nn=SimpleNamespace(Linear=linear_class),
-        ao=SimpleNamespace(quantization=SimpleNamespace(quantize_dynamic=quantize)),
-    ))
-    monkeypatch.setitem(sys.modules, "transformers", SimpleNamespace(
-        AutoTokenizer=SimpleNamespace(from_pretrained=tokenizer_load),
-        AutoModelForSequenceClassification=SimpleNamespace(from_pretrained=model_load),
-    ))
-    return SimpleNamespace(tokenizer=tokenizer, model=model, loads=loads, threads=thread_counts,
-        quantizations=quantizations, quantized_backend=quantized_backend, linear_class=linear_class)
+    monkeypatch.setitem(sys.modules, "tokenizers", SimpleNamespace(Tokenizer=SimpleNamespace(from_file=tokenizer_load)))
+    monkeypatch.setattr("app.reranking.onnx_session", session)
+    return SimpleNamespace(tokenizer=tokenizer, model=model, loads=loads, threads=threads)
 
 
 def test_queries_never_load_and_preload_enforces_cpu_and_cache_settings(tmp_path, runtime):
@@ -126,16 +94,8 @@ def test_queries_never_load_and_preload_enforces_cpu_and_cache_settings(tmp_path
     assert runtime.loads == []
     provider.preload()
     assert provider.available and provider.ready
-    assert runtime.model.device == "cpu"
-    assert runtime.model.evaluating
     assert runtime.threads == [provider.num_threads]
-    for _, name, options in runtime.loads:
-        assert name == "BAAI/bge-reranker-v2-m3"
-        assert options["revision"] == "fixed-revision"
-        assert options["cache_dir"] == str(tmp_path)
-        assert options["local_files_only"] is True
-        assert options["trust_remote_code"] is False
-    assert runtime.loads[1][2]["torch_dtype"] == "float32"
+    assert runtime.loads == [("tokenizer", str(tmp_path / "tokenizer.json")), ("model", str(tmp_path / "model.onnx"))]
 
 
 def test_scores_align_after_batching_deduplication_and_cache_hits(tmp_path, runtime):
@@ -147,10 +107,7 @@ def test_scores_align_after_batching_deduplication_and_cache_hits(tmp_path, runt
     assert runtime.model.calls == 2
     assert provider.score("other query", ["3"]) == [3]
     assert runtime.model.calls == 3
-    for pairs, options in runtime.tokenizer.calls:
-        assert len(pairs) <= 2
-        assert options == {"padding": True, "truncation": False, "return_tensors": "pt"}
-    assert all(tensor.devices == ["cpu"] for tensor in runtime.tokenizer.tensors)
+    assert all(len(feeds["input_ids"]) <= 2 for feeds in runtime.model.feeds)
 
 
 def test_standalone_image_snapshot_loads_offline_without_changing_identity(tmp_path, runtime):
@@ -163,10 +120,7 @@ def test_standalone_image_snapshot_loads_offline_without_changing_identity(tmp_p
     provider.preload()
     assert provider.model_name == "BAAI/bge-reranker-v2-m3"
     assert provider.revision == "pinned-revision"
-    for _, source, options in runtime.loads:
-        assert source == str(tmp_path)
-        assert options["local_files_only"] is True
-        assert options["revision"] == "pinned-revision"
+    assert all(path.startswith(str(tmp_path)) for _, path in runtime.loads)
     assert provider.score("query", ["3", "1"]) == [3, 1]
 
 
@@ -206,7 +160,7 @@ def test_lru_has_fixed_capacity_and_returns_all_scores_when_request_exceeds_cach
     assert len(provider._scores) == 2
 
 
-@pytest.mark.parametrize("logits", [FakeTensor([float("nan")]), FakeTensor([float("inf")]), FakeTensor([1, 2], (1, 2))])
+@pytest.mark.parametrize("logits", [np.array([[np.nan]]), np.array([[np.inf]]), np.array([[1.0, 2.0]])])
 def test_invalid_outputs_are_errors_and_do_not_populate_cache(tmp_path, runtime, logits):
     provider = LocalRerankerProvider(cache_dir=tmp_path)
     provider.preload()
@@ -336,7 +290,7 @@ def test_splitting_preserves_every_source_character_and_pair_token_budget(tmp_pa
     cursor = 0
     previous_start = -1
     for chunk in chunks:
-        assert len(runtime.tokenizer.encode("很长的问题", chunk, add_special_tokens=True, truncation=False)) <= 32
+        assert len(runtime.tokenizer.encode("很长的问题", chunk).ids) <= 32
         start = text.find(chunk, previous_start + 1)
         assert 0 <= start <= cursor
         cursor = start + len(chunk)
@@ -358,59 +312,34 @@ def test_oversized_inputs_are_rejected_without_inference_truncation_or_cooldown(
     assert provider.score("q", ["1"]) == [1]
 
 
-@pytest.mark.parametrize(("architecture", "requested", "effective"), [
-    ("x86_64", "auto", "int8"), ("AMD64", "auto", "int8"),
-    ("aarch64", "auto", "none"), ("x86_64", "none", "none"),
-    ("x86_64", "int8", "int8"),
-])
-def test_quantization_selection_is_explicit_cpu_only_and_reported(tmp_path, runtime, monkeypatch, architecture, requested, effective):
-    monkeypatch.setattr("app.reranking.platform.machine", lambda: architecture)
-    provider = LocalRerankerProvider(cache_dir=tmp_path, quantization=requested)
-    provider.preload()
-    assert provider.effective_quantization == effective
-    assert provider.metadata["effective_quantization"] == effective
-    assert provider.metadata["quantization"] == requested
-    assert provider.metadata["device"] == runtime.model.device == "cpu"
-    assert len(runtime.quantizations) == (1 if effective == "int8" else 0)
-    if effective == "int8":
-        assert runtime.quantizations[0] == (runtime.model, {runtime.linear_class}, "qint8", "x86", True)
-        assert provider.quantization_engine == "x86"
-    provider.preload()
-    assert len(runtime.quantizations) == (1 if effective == "int8" else 0)
-
-
-@pytest.mark.parametrize("architecture", ["aarch64", "x86_64"])
-def test_unsupported_explicit_int8_fails_without_silent_fp32_fallback(tmp_path, runtime, monkeypatch, architecture):
-    monkeypatch.setattr("app.reranking.platform.machine", lambda: architecture)
-    runtime.quantized_backend.supported_engines = ["qnnpack"]
-    provider = LocalRerankerProvider(cache_dir=tmp_path, quantization="int8")
-    with pytest.raises(RerankerUnavailableError, match="x86 quantization engine"):
-        provider.preload()
-    assert not provider.available and provider.error
+def test_onnx_int8_model_is_reported_and_keys_the_score_cache(tmp_path, runtime):
+    provider = LocalRerankerProvider(cache_dir=tmp_path)
     assert provider.effective_quantization is None
-    assert not runtime.loads
-
-
-def test_pair_cache_identity_includes_quantization_configuration(tmp_path, runtime, monkeypatch):
-    monkeypatch.setattr("app.reranking.platform.machine", lambda: "x86_64")
-    full = LocalRerankerProvider(cache_dir=tmp_path, quantization="none")
-    quantized = LocalRerankerProvider(cache_dir=tmp_path, quantization="auto")
-    full.preload()
-    quantized.preload()
-    assert full._cache_key("q", "passage") != quantized._cache_key("q", "passage")
-
-
-def test_auto_uses_fp32_when_x86_quantization_engine_is_unavailable(tmp_path, runtime, monkeypatch):
-    monkeypatch.setattr("app.reranking.platform.machine", lambda: "x86_64")
-    runtime.quantized_backend.supported_engines = ["qnnpack"]
-    provider = LocalRerankerProvider(cache_dir=tmp_path, quantization="auto")
     provider.preload()
-    assert provider.available and provider.error is None
-    assert provider.metadata["quantization"] == "auto"
-    assert provider.metadata["effective_quantization"] == "none"
-    assert provider.quantization_engine is None
-    assert not runtime.quantizations
-    assert provider.score("q", ["1"]) == [1]
+    assert provider.metadata["quantization"] == provider.metadata["effective_quantization"] == "int8"
+    assert provider.metadata["quantization_engine"] == "onnxruntime"
+    assert provider.metadata["device"] == "cpu"
+    assert "int8:int8:onnxruntime" in provider._cache_key("q", "passage")
+
+
+@pytest.mark.parametrize("missing", ["model.onnx", "tokenizer.json"])
+def test_missing_model_files_fail_retryably_without_loading(tmp_path, runtime, missing):
+    (tmp_path / missing).unlink()
+    provider = LocalRerankerProvider(cache_dir=tmp_path)
+    with pytest.raises(RerankerUnavailableError, match="missing"):
+        provider.preload()
+    assert not provider.ready and provider.error
+    assert runtime.loads == []
+
+
+def test_pairs_are_right_padded_with_an_attention_mask(tmp_path, runtime):
+    provider = LocalRerankerProvider(cache_dir=tmp_path, batch_size=2)
+    provider.preload()
+    assert provider.score("q", ["7", "123"]) == [7, 123]
+    feeds = runtime.model.feeds[0]
+    assert feeds["input_ids"].dtype == feeds["attention_mask"].dtype == np.int64
+    assert feeds["attention_mask"].tolist() == [[1, 1, 1, 1, 1, 0, 0], [1] * 7]
+    assert feeds["input_ids"][0].tolist()[-2:] == [PAD, PAD]
 
 
 def test_idle_unload_frees_the_model_and_a_requested_reload_keeps_scores(tmp_path, runtime, monkeypatch):
@@ -445,7 +374,7 @@ def test_idle_unload_frees_the_model_and_a_requested_reload_keeps_scores(tmp_pat
     calls = runtime.model.calls
     assert provider.score("q", ["1", "2"]) == [1, 2]
     assert runtime.model.calls == calls
-    assert [kind for kind, _, _ in runtime.loads].count("model") == 2
+    assert [kind for kind, _ in runtime.loads].count("model") == 2
 
 
 def test_idle_unload_skips_a_busy_model_and_disabled_providers_ignore_requests(tmp_path, runtime, monkeypatch):

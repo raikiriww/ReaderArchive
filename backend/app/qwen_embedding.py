@@ -1,4 +1,8 @@
-"""Offline CPU Qwen embeddings with bounded, source-complete passage inputs."""
+"""Offline CPU Qwen embeddings with bounded, source-complete passage inputs.
+
+The image ships the official Qwen tokenizer and Qdrant's ONNX export with
+8-bit weights (fp32 activations), run by onnxruntime; torch is not needed.
+"""
 from __future__ import annotations
 
 import json
@@ -9,7 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from app.model_runtime import release_unused_memory, serialized_model_load
+from app.model_runtime import onnx_session, release_unused_memory, serialized_model_load
 
 if TYPE_CHECKING:
     from app.core.config import Settings
@@ -18,6 +22,39 @@ MODEL_NAME = 'Qwen/Qwen3-Embedding-0.6B'
 MODEL_REVISION = '97b0c614be4d77ee51c0cef4e5f07c00f9eb65b3'
 QUERY_INSTRUCTION = 'Given a web search query, retrieve relevant passages that answer the query'
 MAX_INPUT_TOKENS = 512
+ONNX_FILE = 'model.onnx'
+
+
+class QwenTokenizer:
+    """Wrap a ``tokenizers.Tokenizer`` with the calls chunking and batching use."""
+
+    def __init__(self, tokenizer: Any) -> None:
+        tokenizer.no_padding()
+        tokenizer.no_truncation()
+        pad_id = tokenizer.token_to_id('<|endoftext|>')
+        if pad_id is None:
+            raise ValueError('Qwen tokenizer has no <|endoftext|> padding token.')
+        self._tokenizer = tokenizer
+        self.pad_id = int(pad_id)
+
+    def encode(self, text: str, add_special_tokens: bool = True) -> list[int]:
+        return list(self._tokenizer.encode(text, add_special_tokens=add_special_tokens).ids)
+
+    def decode(self, ids: list[int]) -> str:
+        return str(self._tokenizer.decode(ids, skip_special_tokens=False))
+
+    def pad_batch(self, texts: list[str]) -> tuple[Any, Any]:
+        """Left-pad, so the last position of every row is its final real token."""
+        import numpy as np
+
+        rows = [self.encode(text) for text in texts]
+        width = max(map(len, rows))
+        ids = np.full((len(rows), width), self.pad_id, dtype=np.int64)
+        mask = np.zeros((len(rows), width), dtype=np.int64)
+        for index, row in enumerate(rows):
+            ids[index, width-len(row):] = row
+            mask[index, width-len(row):] = 1
+        return ids, mask
 
 
 @dataclass(frozen=True)
@@ -129,9 +166,6 @@ class QwenEmbeddingProvider:
                 ):
                     raise ValueError('Local Qwen model identity does not match the configured model/revision.')
             return directory
-        snapshot = directory / 'models--Qwen--Qwen3-Embedding-0.6B' / 'snapshots' / MODEL_REVISION
-        if (snapshot / 'config.json').is_file():
-            return snapshot
         raise RuntimeError(f'Local Qwen model files are missing from {directory}.')
 
     @serialized_model_load
@@ -143,13 +177,12 @@ class QwenEmbeddingProvider:
         if not 32 <= self.expected_dimensions <= 1024:
             raise ValueError('Qwen embedding dimensions must be between 32 and 1024.')
         directory = self._resolve_model_path()
-        import torch
-        from transformers import AutoModel, AutoTokenizer
+        if not (directory / ONNX_FILE).is_file():
+            raise RuntimeError(f'Local Qwen ONNX model is missing from {directory}.')
+        from tokenizers import Tokenizer  # type: ignore[import-untyped]
 
-        torch.set_num_threads(self.settings.search_cpu_threads)
-        tokenizer = AutoTokenizer.from_pretrained(directory, local_files_only=True, padding_side='left')
-        model = AutoModel.from_pretrained(directory, local_files_only=True,
-            torch_dtype=torch.float32, attn_implementation='sdpa').eval().to('cpu')
+        tokenizer = QwenTokenizer(Tokenizer.from_file(str(directory / 'tokenizer.json')))
+        model = onnx_session(directory / ONNX_FILE, self.settings.search_cpu_threads)
         self._tokenizer, self._model = tokenizer, model
         release_unused_memory()
         return model
@@ -165,21 +198,20 @@ class QwenEmbeddingProvider:
             raise
 
     def _encode(self, texts: list[str]) -> list[list[float]]:
-        import torch
+        import numpy as np
 
         model = self._load_model()
         vectors: list[list[float]] = []
         # Bound memory independently of a caller's indexing batch size.
         for offset in range(0, len(texts), 4):
-            batch = self._tokenizer(texts[offset:offset+4], padding=True,
-                truncation=False, return_tensors='pt')
-            if batch['input_ids'].shape[1] > MAX_INPUT_TOKENS:
+            ids, mask = self._tokenizer.pad_batch(texts[offset:offset+4])
+            if ids.shape[1] > MAX_INPUT_TOKENS:
                 raise ValueError('Embedding input exceeds 512 tokens; prepare source chunks first.')
-            with torch.inference_mode():
-                # Left padding makes the last position the last source token.
-                hidden = model(**batch).last_hidden_state[:, -1, :self.expected_dimensions]
-                normalized = torch.nn.functional.normalize(hidden, p=2, dim=1)
-                vectors.extend(normalized.tolist())
+            # Left padding makes the last position the last source token.
+            hidden = model.run(['last_hidden_state'], {'input_ids': ids, 'attention_mask': mask})[0]
+            hidden = hidden[:, -1, :self.expected_dimensions].astype(np.float32)
+            norms = np.maximum(np.linalg.norm(hidden, axis=1, keepdims=True), 1e-12)
+            vectors.extend((hidden / norms).tolist())
         for vector in vectors:
             self.validate_dimensions(vector)
         return vectors

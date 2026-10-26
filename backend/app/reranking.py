@@ -1,6 +1,7 @@
 """A bounded, CPU-only cross-encoder with explicit readiness and failure states.
 
-Importing this module does not import torch or transformers. Call ``preload`` in a
+The image ships BAAI's tokenizer and onnx-community's int8 ONNX export, run by
+onnxruntime. Importing this module loads neither. Call ``preload`` in a
 background worker before using ``score`` on a request thread. A worker may also
 ``unload_if_idle`` to free the model, and reload it after ``request_load``. Scores are raw
 single-label logits; callers must not interpret them as calibrated probabilities.
@@ -11,14 +12,15 @@ import hashlib
 import json
 import math
 import os
-import platform
 import threading
 import time
 from collections import OrderedDict
 from pathlib import Path
 from typing import Any
 
-from app.model_runtime import release_unused_memory, serialized_model_load
+from app.model_runtime import onnx_session, release_unused_memory, serialized_model_load
+
+ONNX_FILE = "model.onnx"
 
 
 class RerankerError(RuntimeError):
@@ -55,9 +57,7 @@ class LocalRerankerProvider:
         cache_size: int = 1024,
         lock_timeout_seconds: float = 0.0,
         retry_delay_seconds: float = 60.0,
-        local_files_only: bool = True,
         enabled: bool = True,
-        quantization: str = "auto",
     ) -> None:
         for name, value, maximum in (
             ("num_threads", num_threads, 64),
@@ -75,8 +75,6 @@ class LocalRerankerProvider:
             raise ValueError("lock_timeout_seconds must be between 0 and 0.25.")
         if not math.isfinite(retry_delay_seconds) or retry_delay_seconds < 0:
             raise ValueError("retry_delay_seconds must be finite and nonnegative.")
-        if quantization not in {"auto", "none", "int8"}:
-            raise ValueError("quantization must be auto, none, or int8.")
         if not model_name.strip():
             raise ValueError("model_name must not be empty.")
         self.model_name = model_name
@@ -89,15 +87,14 @@ class LocalRerankerProvider:
         self.cache_size = cache_size
         self.lock_timeout_seconds = lock_timeout_seconds
         self.retry_delay_seconds = retry_delay_seconds
-        self.local_files_only = local_files_only
         self.enabled = enabled
-        self.quantization = quantization
+        # The shipped model is quantized; these feed diagnostics and cache keys.
+        self.quantization = "int8"
         self.effective_quantization: str | None = None
         self.quantization_engine: str | None = None
         self._model: Any = None
         self._tokenizer: Any = None
-        self._torch: Any = None
-        self._budget_tokenizer: Any = None
+        self._pad_id = 0
         self._lock = threading.Lock()
         self._scores: OrderedDict[tuple[str, str | None, int, str, str], float] = OrderedDict()
         self._last_error: str | None = None
@@ -174,7 +171,7 @@ class LocalRerankerProvider:
         except RerankerUnavailableError:
             raise
         except Exception as exc:
-            self._model = self._tokenizer = self._torch = self._budget_tokenizer = None
+            self._model = self._tokenizer = None
             self._scores.clear()
             self.effective_quantization = self.quantization_engine = None
             self._record_failure(exc)
@@ -197,7 +194,7 @@ class LocalRerankerProvider:
             if not self.ready or self.idle_seconds < idle_seconds:
                 return False
             # Scores stay cached: a reload yields the same model and settings.
-            self._model = self._tokenizer = self._torch = self._budget_tokenizer = None
+            self._model = self._tokenizer = None
         finally:
             self._lock.release()
         release_unused_memory()
@@ -213,66 +210,27 @@ class LocalRerankerProvider:
                 or manifest.get("revision") != self.revision
             ):
                 raise ValueError("Local reranker model identity does not match the configured model/revision.")
-        import torch
-        from transformers import AutoModelForSequenceClassification, AutoTokenizer
+        model_path = self.cache_dir / ONNX_FILE
+        tokenizer_path = self.cache_dir / "tokenizer.json"
+        if not model_path.is_file() or not tokenizer_path.is_file():
+            raise RuntimeError(f"Local reranker ONNX model or tokenizer is missing from {self.cache_dir}.")
+        from tokenizers import Tokenizer  # type: ignore[import-untyped]
 
-        self.cache_dir.mkdir(parents=True, exist_ok=True)
-        # PyTorch intra-op threading is process-wide. Set the explicit CPU budget
-        # once during warmup, rather than constructing an unbounded request pool.
-        torch.set_num_threads(self.num_threads)
-        architecture = platform.machine().lower()
-        use_int8 = self.quantization == "int8" or (
-            self.quantization == "auto" and architecture in {"x86_64", "amd64"})
-        if use_int8:
-            supported = architecture in {"x86_64", "amd64"} and "x86" in torch.backends.quantized.supported_engines
-            if not supported and self.quantization == "int8":
-                raise RuntimeError("Requested CPU INT8 reranking requires the supported x86 quantization engine.")
-            use_int8 = supported
-        if use_int8:
-            # Quantization engine selection, like thread count, is process-wide.
-            # Configure it only during model warmup, never in a query operation.
-            torch.backends.quantized.engine = "x86"
-        options: dict[str, Any] = {
-            "cache_dir": str(self.cache_dir),
-            "local_files_only": self.local_files_only,
-            "trust_remote_code": False,
-        }
-        if self.revision is not None:
-            options["revision"] = self.revision
-        # Images contain one standalone snapshot, rather than an entire Hub
-        # cache. Keep the configured model identity for diagnostics/cache keys.
-        model_source = str(self.cache_dir) if (self.cache_dir / "config.json").is_file() else self.model_name
-        tokenizer = AutoTokenizer.from_pretrained(model_source, **options)
-        model = AutoModelForSequenceClassification.from_pretrained(
-            model_source, torch_dtype=torch.float32, **options
-        )
-        model.to("cpu")
-        model.eval()
-        if use_int8:
-            # In place, so the fp32 Linear weights are replaced one at a time
-            # instead of holding a full fp32 copy beside the int8 model.
-            model = torch.ao.quantization.quantize_dynamic(
-                model, {torch.nn.Linear}, dtype=torch.qint8, inplace=True)
-            model.to("cpu")
-            model.eval()
-        budget_tokenizer = None
-        if getattr(tokenizer, "backend_tokenizer", None) is not None:
-            from tokenizers import Tokenizer  # type: ignore[import-untyped]
-
-            budget_tokenizer = Tokenizer.from_str(tokenizer.backend_tokenizer.to_str())
-            budget_tokenizer.no_truncation()
-            budget_tokenizer.no_padding()
+        tokenizer = Tokenizer.from_file(str(tokenizer_path))
+        tokenizer.no_truncation()
+        tokenizer.no_padding()
+        pad_id = tokenizer.token_to_id("<pad>")
+        if pad_id is None:
+            raise ValueError("Reranker tokenizer has no <pad> token.")
+        model = onnx_session(model_path, self.num_threads)
         # Publish only a fully initialized pair. A failed load can be retried.
-        self._torch, self._tokenizer, self._model = torch, tokenizer, model
-        self._budget_tokenizer = budget_tokenizer
-        self.effective_quantization = "int8" if use_int8 else "none"
-        self.quantization_engine = "x86" if use_int8 else None
+        self._tokenizer, self._model, self._pad_id = tokenizer, model, int(pad_id)
+        self.effective_quantization = "int8"
+        self.quantization_engine = "onnxruntime"
         release_unused_memory()
 
     def _pair_size(self, query: str, passage: str) -> int:
-        if self._budget_tokenizer is not None:
-            return len(self._budget_tokenizer.encode(query, passage, add_special_tokens=True).ids)
-        return len(self._tokenizer.encode(query, passage, add_special_tokens=True, truncation=False))
+        return len(self._tokenizer.encode(query, passage, add_special_tokens=True).ids)
 
     def split_passage(self, query: str, text: str) -> list[str]:
         """Cover every source character using measured, overlapping pair inputs.
@@ -370,20 +328,19 @@ class LocalRerankerProvider:
             self._lock.release()
 
     def _score_batch(self, query: str, passages: list[str]) -> list[float]:
-        if any(self._pair_size(query, passage) > self.max_length for passage in passages):
+        import numpy as np
+
+        rows = [self._tokenizer.encode(query, passage, add_special_tokens=True).ids for passage in passages]
+        if any(len(row) > self.max_length for row in rows):
             raise RerankerInputError("Reranker input exceeds the token budget; call split_passage first.")
-        encoded = self._tokenizer(
-            [[query, passage] for passage in passages],
-            padding=True,
-            truncation=False,
-            return_tensors="pt",
-        )
-        if int(encoded["input_ids"].shape[-1]) > self.max_length:
-            raise RerankerInputError("Tokenizer pair exceeds the token budget; input was not truncated.")
-        encoded = {name: value.to("cpu") for name, value in encoded.items()}
-        with self._torch.inference_mode():
-            logits = self._model(**encoded).logits
+        width = max(map(len, rows))
+        ids = np.full((len(rows), width), self._pad_id, dtype=np.int64)
+        mask = np.zeros((len(rows), width), dtype=np.int64)
+        for index, row in enumerate(rows):
+            ids[index, :len(row)] = row
+            mask[index, :len(row)] = 1
+        logits = self._model.run(["logits"], {"input_ids": ids, "attention_mask": mask})[0]
         shape = tuple(logits.shape)
         if shape not in ((len(passages),), (len(passages), 1)):
             raise ValueError(f"Unexpected reranker score shape: {shape}.")
-        return [float(value) for value in logits.detach().float().cpu().reshape(-1).tolist()]
+        return [float(value) for value in logits.reshape(-1).tolist()]

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import re
 import threading
 import time
@@ -13,6 +14,8 @@ from app.archive_formats import IMAGE_ARCHIVE_SUFFIXES
 
 if TYPE_CHECKING:
     from app.core.config import Settings
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -125,13 +128,20 @@ class LocalEmbeddingProvider:
             from fastembed import TextEmbedding
 
             self.settings.semantic_model_dir.mkdir(parents=True, exist_ok=True)
-            self._model = TextEmbedding(
+            options = dict(
                 model_name=self.settings.semantic_model_name,
                 cache_dir=str(self.settings.semantic_model_dir),
                 threads=self.settings.semantic_threads,
                 providers=["CPUExecutionProvider"],
-                local_files_only=True,
             )
+            try:
+                self._model = TextEmbedding(**options, local_files_only=True)
+            except Exception:
+                # Only an explicitly chosen non-default model reaches here; it is
+                # downloaded once into the persistent model directory.
+                logger.info("Downloading semantic model %s into %s.",
+                    self.settings.semantic_model_name, self.settings.semantic_model_dir)
+                self._model = TextEmbedding(**options, local_files_only=False)
             return self._model
         except Exception as exc:
             self._last_error = str(exc)
