@@ -97,11 +97,12 @@ settings.
 
 The default CPU search combines Chinese/English keyword matching with
 Qwen3-Embedding-0.6B and BGE-reranker-v2-m3. No dedicated GPU is required.
-Models are included in the image; the first upgrade rebuilds search data in
-the background while keyword search stays available. Explicit legacy MiniLM
-configurations retain their model directory and index version. Allow additional
-memory for the two models; actual local verification used about 5 GiB for the
-application process, and startup on other CPU paths can use more.
+Both models are included in the image as 8-bit ONNX files and run on
+onnxruntime; upgrading from MiniLM rebuilds search data in the background while
+keyword search stays available. Explicit legacy MiniLM configurations keep
+their index version; the MiniLM model itself is no longer in the image and is
+downloaded once into `/app/data/models/fastembed` on first start. Allow about
+2.5 GiB of memory for the application process with both models loaded.
 
 Implementation and measured limits are recorded in
 [the backend upgrade notes](docs/design/search/backend-upgrade.md) and

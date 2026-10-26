@@ -84,7 +84,6 @@ class ArchiveTaskService:
             cache_dir=archiver.settings.search_rerank_model_dir,
             model_name=archiver.settings.search_rerank_model_name,
             revision=archiver.settings.search_rerank_revision,
-            quantization=archiver.settings.search_rerank_quantization,
             enabled=archiver.settings.search_rerank_enabled and archiver.settings.semantic_search_enabled,
             num_threads=archiver.settings.search_cpu_threads,
             batch_size=archiver.settings.search_rerank_batch_size,

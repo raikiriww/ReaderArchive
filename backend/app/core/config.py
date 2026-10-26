@@ -42,7 +42,9 @@ class Settings(BaseSettings):
     rss_request_timeout_seconds: int = 20
     semantic_search_enabled: bool = True
     semantic_model_name: str = "Qwen/Qwen3-Embedding-0.6B"
-    semantic_model_dir: Path = Path("/app/models/fastembed")
+    # MiniLM is not in the image. When chosen explicitly, it is downloaded once
+    # into the app data volume. Qwen (the default) ships in /app/models/qwen.
+    semantic_model_dir: Path = Path("/app/data/models/fastembed")
     semantic_embedding_dimensions: int = 384
     semantic_text_version: str = "token-body-v2"
     semantic_batch_size: int = 16
@@ -59,7 +61,6 @@ class Settings(BaseSettings):
     search_rerank_enabled: bool = True
     search_rerank_model_name: str = "BAAI/bge-reranker-v2-m3"
     search_rerank_revision: str = "953dc6f6f85a1b2dbfca4c34a2796e7dde08d41e"
-    search_rerank_quantization: str = "auto"
     search_rerank_model_dir: Path = Path("/app/models/reranker")
     search_cpu_threads: int = Field(default=4, ge=1, le=32)
     search_rerank_batch_size: int = 2

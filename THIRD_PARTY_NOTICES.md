@@ -22,7 +22,10 @@ sets are recorded in `backend/uv.lock` and `frontend/bun.lock`.
 | Node.js | Frontend build runtime | MIT | https://github.com/nodejs/node |
 | uv | Python dependency management | MIT or Apache-2.0 | https://github.com/astral-sh/uv |
 | Python | Runtime | Python Software Foundation License | https://docs.python.org/3/license.html |
-| paraphrase-multilingual-MiniLM-L12-v2 | Semantic search model | Apache-2.0 | https://huggingface.co/sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2 |
+| Qwen3-Embedding-0.6B (8-bit ONNX export by Qdrant) | Default semantic search model, shipped in the image | Apache-2.0 | https://huggingface.co/Qwen/Qwen3-Embedding-0.6B, https://huggingface.co/Qdrant/Qwen3-Embedding-0.6B-onnx |
+| bge-reranker-v2-m3 (int8 ONNX export by onnx-community) | Search result ranking model, shipped in the image | Apache-2.0 | https://huggingface.co/BAAI/bge-reranker-v2-m3, https://huggingface.co/onnx-community/bge-reranker-v2-m3-ONNX |
+| ONNX Runtime | Model inference | MIT | https://github.com/microsoft/onnxruntime |
+| paraphrase-multilingual-MiniLM-L12-v2 | Optional semantic search model, downloaded only when configured | Apache-2.0 | https://huggingface.co/sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2 |
 
 ## Application Dependencies
 

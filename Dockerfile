@@ -83,72 +83,61 @@ COPY backend/pyproject.toml backend/uv.lock ./
 RUN --mount=type=cache,target=/root/.cache/uv \
   env -u VIRTUAL_ENV UV_CACHE_DIR=/root/.cache/uv uv sync --locked --no-dev --no-install-project
 
-RUN --mount=type=cache,target=/root/.cache/reader-fastembed \
-  HF_HOME=/root/.cache/reader-fastembed/hf /app/backend/.venv/bin/python - <<'PY'
-from pathlib import Path
-from shutil import copytree, rmtree
-
-from fastembed import TextEmbedding
-
-cache_dir = Path("/root/.cache/reader-fastembed")
-image_dir = Path("/app/models/fastembed")
-model = TextEmbedding(
-    model_name="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
-    cache_dir=str(cache_dir),
-)
-list(model.embed(["Reader semantic search warmup"]))
-if image_dir.exists():
-    rmtree(image_dir)
-copytree(cache_dir, image_dir)
-PY
-
-# Ship the CPU ranking model in the image: upgrades do not require a new
-# compose setting or a network download on the first user search.
-RUN --mount=type=cache,target=/root/.cache/reader-reranker \
-  HF_HOME=/root/.cache/reader-reranker/hf /app/backend/.venv/bin/python - <<'PY'
-from pathlib import Path
-from shutil import copytree
+# Ship both search models in the image, so upgrades need no compose setting and
+# no network download. Each model is the official tokenizer and config at a
+# pinned revision plus a pinned, checksummed 8-bit ONNX export that onnxruntime
+# runs. MiniLM is no longer shipped; it is downloaded only if chosen.
+RUN --mount=type=cache,target=/root/.cache/reader-models \
+  HF_HOME=/root/.cache/reader-models/hf /app/backend/.venv/bin/python - <<'PY'
+import hashlib
 import json
-from huggingface_hub import snapshot_download
-
-cache = Path('/root/.cache/reader-reranker')
-snapshot = snapshot_download(
-    'BAAI/bge-reranker-v2-m3',
-    revision='953dc6f6f85a1b2dbfca4c34a2796e7dde08d41e',
-    cache_dir=str(cache),
-    allow_patterns=['config.json', 'model.safetensors', 'tokenizer.json',
-                    'tokenizer_config.json', 'special_tokens_map.json',
-                    'sentencepiece.bpe.model'],
-)
-copytree(snapshot, '/app/models/reranker')
-Path('/app/models/reranker/reader-model.json').write_text(json.dumps({
-    'model_name': 'BAAI/bge-reranker-v2-m3',
-    'revision': '953dc6f6f85a1b2dbfca4c34a2796e7dde08d41e',
-}))
-PY
-
-# Keep both embedding models available offline so users who explicitly retain
-# MiniLM can upgrade the same image without changing their compose settings.
-RUN --mount=type=cache,target=/root/.cache/reader-qwen \
-  HF_HOME=/root/.cache/reader-qwen/hf /app/backend/.venv/bin/python - <<'PY'
-from shutil import copytree
 from pathlib import Path
-import json
-from huggingface_hub import snapshot_download
+from shutil import copyfile
 
-snapshot = snapshot_download(
-    'Qwen/Qwen3-Embedding-0.6B',
-    revision='97b0c614be4d77ee51c0cef4e5f07c00f9eb65b3',
-    cache_dir='/root/.cache/reader-qwen',
-    allow_patterns=['config.json', 'model.safetensors', 'tokenizer.json',
-                    'tokenizer_config.json', 'special_tokens_map.json',
-                    'vocab.json', 'merges.txt'],
-)
-copytree(snapshot, '/app/models/qwen')
-Path('/app/models/qwen/reader-model.json').write_text(json.dumps({
-    'model_name': 'Qwen/Qwen3-Embedding-0.6B',
-    'revision': '97b0c614be4d77ee51c0cef4e5f07c00f9eb65b3',
-}))
+from huggingface_hub import hf_hub_download
+
+cache = '/root/.cache/reader-models'
+models = {
+    '/app/models/qwen': dict(
+        model_name='Qwen/Qwen3-Embedding-0.6B',
+        revision='97b0c614be4d77ee51c0cef4e5f07c00f9eb65b3',
+        files=['config.json', 'tokenizer.json', 'tokenizer_config.json'],
+        # Apache-2.0. 8-bit weights with fp32 activations (MatMulNBits).
+        onnx=dict(repo='Qdrant/Qwen3-Embedding-0.6B-onnx',
+                  revision='af95f2c416ffe9379369ad64f9113e865db6112c',
+                  file='onnx/model_quantized.onnx',
+                  sha256='b39d0623bfc7d2dfc2dcc0d32152c5c5b8d61e9e74679e8222dcce5cf32486b9'),
+    ),
+    '/app/models/reranker': dict(
+        model_name='BAAI/bge-reranker-v2-m3',
+        revision='953dc6f6f85a1b2dbfca4c34a2796e7dde08d41e',
+        files=['config.json', 'tokenizer.json', 'tokenizer_config.json'],
+        # Hugging Face's onnx-community int8 export of the Apache-2.0 model.
+        onnx=dict(repo='onnx-community/bge-reranker-v2-m3-ONNX',
+                  revision='6f5ff65298512715a1e669753bc754d2bc8f367b',
+                  file='onnx/model_int8.onnx',
+                  sha256='912fc1215c2dbff6499700534bd8d31253af01573861abbfc43afd1fab6cce5d'),
+    ),
+}
+for target, spec in models.items():
+    directory = Path(target)
+    directory.mkdir(parents=True)
+    for name in spec['files']:
+        copyfile(hf_hub_download(spec['model_name'], name, revision=spec['revision'],
+                                 cache_dir=cache), directory / name)
+    onnx = spec['onnx']
+    source = hf_hub_download(onnx['repo'], onnx['file'], revision=onnx['revision'], cache_dir=cache)
+    digest = hashlib.sha256()
+    with open(source, 'rb') as handle:
+        for block in iter(lambda: handle.read(1 << 20), b''):
+            digest.update(block)
+    if digest.hexdigest() != onnx['sha256']:
+        raise SystemExit(f"Checksum mismatch for {onnx['repo']}/{onnx['file']}")
+    copyfile(source, directory / 'model.onnx')
+    (directory / 'reader-model.json').write_text(json.dumps({
+        'model_name': spec['model_name'], 'revision': spec['revision'],
+        'onnx_repo': onnx['repo'], 'onnx_revision': onnx['revision'], 'onnx_file': onnx['file'],
+    }))
 PY
 
 COPY backend/app ./app

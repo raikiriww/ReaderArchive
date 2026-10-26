@@ -23,6 +23,8 @@ from app.core.config import Settings
 from app.core.db import get_engine
 from app.crud import ArchiveTaskRepository
 from app.models import ArchiveTaskSourceType
+from app.qwen_embedding import MODEL_NAME as QWEN_MODEL_NAME
+from app.qwen_embedding import QwenEmbeddingProvider
 from app.semantic import (
     LocalEmbeddingProvider,
     SemanticDocumentPreparer,
@@ -454,7 +456,9 @@ def seed() -> None:
         max_chars=settings.semantic_chunk_max_chars,
         overlap_chars=settings.semantic_chunk_overlap_chars,
     )
-    provider = LocalEmbeddingProvider(settings)
+    # Pick the provider exactly as the application lifespan does.
+    provider = (QwenEmbeddingProvider(settings) if settings.semantic_model_name == QWEN_MODEL_NAME
+        else LocalEmbeddingProvider(settings))
     provider.preload()
     service = ArchiveTaskService(
         repository, SingleFileArchiver(settings), YtDlpDownloader(settings),
